@@ -74,11 +74,7 @@ class AmazonParser:
 
         if not order_matches:
             warnings.append("HTML'de 'Order ID:' pattern bulunamadı.")
-            warnings.append(f"DEBUG ilk blok: {repr(content[:500]) if content else 'blok yok'}")
             return orders, warnings
-
-        order_blocks = [content[order_matches[i].start():(order_matches[i+1].start() if i+1 < len(order_matches) else len(content))] for i in range(len(order_matches))]
-        warnings.append(f"DEBUG ilk blok: {repr(order_blocks[0][:500]) if order_blocks else 'blok yok'}")
 
         for i, match in enumerate(order_matches):
             order_id = match.group(1).strip()
@@ -98,7 +94,7 @@ class AmazonParser:
         # SKU — 3 fallback pattern (production'la birebir)
         sku = None
         sku_patterns = [
-            r'SKU:\s*</span>\s*(?:\s*<[^>]+>\s*)*\s*<span>\s*([^<]+?)\s*</span>',
+            r'SKU:\s*</span>\s*<span>\s*([^<]+?)\s*</span>',
             r'<span>\s*([^<]+?)\s*</span>\s*</div>\s*<div[^>]*>\s*<span[^>]*>\s*ASIN:',
         ]
         for pat in sku_patterns:

@@ -83,14 +83,6 @@ with tab_upload:
                 tmp.write(uf.read())
                 tmp_path = tmp.name
 
-            st.write(f"Dosya yolu: {tmp_path}, Boyut: {os.path.getsize(tmp_path)}")
-
-            import re
-            with open(tmp_path, 'r', encoding='utf-8', errors='replace') as f:
-                raw = f.read()
-            sku_test = re.findall(r'SKU:\s*</span>\s*(?:\s*<[^>]+>\s*)*\s*<span>\s*([\w\-]+)\s*</span>', raw)
-            st.write(f"Direkt regex test: {len(sku_test)} SKU bulundu → {sku_test[:3]}")
-
             try:
                 parser = AmazonParser(tmp_path)
                 parsed, warnings = parser.parse()
