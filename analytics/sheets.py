@@ -177,6 +177,27 @@ class SheetsClient:
         self._queue.delete_rows(cell.row)
         return True
 
+    def remove_from_queue(self, order_item_id: str) -> bool:
+        """Siparişi Queue'dan siler (Log'a taşımaz). Başarılıysa True döner."""
+        oid = str(order_item_id).strip()
+        try:
+            cell = self._queue.find(oid, in_column=QUEUE_COLUMNS.index("order_item_id") + 1)
+        except gspread.CellNotFound:
+            return False
+        self._queue.delete_rows(cell.row)
+        return True
+
+    def get_log(self) -> list[dict]:
+        """Log sheet'indeki tüm işlenmiş siparişleri döner."""
+        return self._sheet_to_dicts(self._log)
+
+    def row_counts(self) -> dict[str, int]:
+        """Queue ve Log sheet'lerindeki veri satırı sayılarını döner (başlık hariç)."""
+        return {
+            "queue": max(0, len(self._queue.get_all_values()) - 1),
+            "log": max(0, len(self._log.get_all_values()) - 1),
+        }
+
     def clear_queue(self) -> int:
         """Queue sheet'ini temizler (başlık satırı kalır). Silinen satır sayısını döner."""
         all_rows = self._queue.get_all_values()
