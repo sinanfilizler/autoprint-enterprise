@@ -68,16 +68,29 @@ def _build_gspread_client() -> gspread.Client:
     return gspread.service_account(filename=str(creds_path))
 
 
+def _get_spreadsheet_id() -> str:
+    """os.getenv'den okur; boşsa Streamlit Secrets'a bakar."""
+    sid = os.getenv("GOOGLE_SHEETS_SPREADSHEET_ID", "")
+    if not sid:
+        try:
+            import streamlit as st
+            sid = st.secrets.get("GOOGLE_SHEETS_SPREADSHEET_ID", "")
+        except Exception:
+            pass
+    return sid
+
+
 class SheetsClient:
     def __init__(self):
-        if not SPREADSHEET_ID:
-            raise ValueError("GOOGLE_SHEETS_SPREADSHEET_ID .env'de tanımlı değil")
+        spreadsheet_id = _get_spreadsheet_id()
+        if not spreadsheet_id:
+            raise ValueError("GOOGLE_SHEETS_SPREADSHEET_ID tanımlı değil (.env veya Streamlit Secrets)")
 
         gc = _build_gspread_client()
         try:
-            self._spreadsheet = gc.open_by_key(SPREADSHEET_ID)
+            self._spreadsheet = gc.open_by_key(spreadsheet_id)
         except SpreadsheetNotFound:
-            raise SpreadsheetNotFound(f"Spreadsheet bulunamadı: {SPREADSHEET_ID}")
+            raise SpreadsheetNotFound(f"Spreadsheet bulunamadı: {spreadsheet_id}")
 
         self._queue = self._get_or_create_sheet(QUEUE_SHEET, QUEUE_COLUMNS)
         self._log = self._get_or_create_sheet(LOG_SHEET, LOG_COLUMNS)
