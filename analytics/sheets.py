@@ -16,7 +16,6 @@ from pathlib import Path
 
 import gspread
 from dotenv import load_dotenv
-from google.oauth2.service_account import Credentials
 from gspread.exceptions import APIError, SpreadsheetNotFound
 
 load_dotenv()
@@ -29,11 +28,6 @@ CREDENTIALS_PATH = os.getenv(
 SPREADSHEET_ID = os.getenv("GOOGLE_SHEETS_SPREADSHEET_ID", "")
 QUEUE_SHEET = os.getenv("GOOGLE_SHEETS_QUEUE_SHEET", "Queue")
 LOG_SHEET = os.getenv("GOOGLE_SHEETS_LOG_SHEET", "Log")
-
-SCOPES = [
-    "https://spreadsheets.google.com/feeds",
-    "https://www.googleapis.com/auth/drive",
-]
 
 # ── Sütun düzeni ────────────────────────────────────────────────────────────
 QUEUE_COLUMNS = [
@@ -48,31 +42,23 @@ LOG_COLUMNS = QUEUE_COLUMNS + ["processed_at"]
 
 
 def _build_gspread_client() -> gspread.Client:
-    # 1. Streamlit Secrets (Cloud ortamı)
-    try:
-        import streamlit as st
-        import sys
-        print(f"Streamlit secrets keys: {list(st.secrets.keys())}", file=sys.stderr)
-        if "gcp_service_account" in st.secrets:
-            creds_dict = dict(st.secrets["gcp_service_account"])
-            creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
-            creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
-            return gspread.authorize(creds)
-        else:
-            print("gcp_service_account bulunamadı — Streamlit Secrets'a eklenmemiş", file=sys.stderr)
-    except Exception as e:
-        import sys
-        print(f"Streamlit secrets error: {e}", file=sys.stderr)
-
-    # 2. Lokal fallback: credentials.json
+    # 1. Lokal: credentials.json varsa direkt kullan
     creds_path = Path(CREDENTIALS_PATH)
     if creds_path.exists():
         return gspread.service_account(filename=str(creds_path))
 
-    raise RuntimeError(
-        "Google credentials bulunamadı. Streamlit Cloud için Secrets'a "
-        "[gcp_service_account] ekle. Lokal için credentials.json yerleştir."
-    )
+    # 2. Cloud: st.secrets["gcp_service_account"] dict'inden oluştur
+    try:
+        import streamlit as st
+        creds_dict = dict(st.secrets["gcp_service_account"])
+        return gspread.service_account_from_dict(creds_dict)
+    except Exception as e:
+        raise RuntimeError(
+            f"Google credentials bulunamadı. "
+            f"Lokal için credentials.json yerleştir. "
+            f"Cloud için Streamlit Secrets'a [gcp_service_account] ekle. "
+            f"Hata: {e}"
+        )
 
 
 def _get_spreadsheet_id() -> str:
