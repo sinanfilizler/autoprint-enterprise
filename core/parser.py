@@ -1,18 +1,28 @@
 import re
-import tempfile
 from pathlib import Path
+from typing import Optional
 
-from bs4 import BeautifulSoup
-
-FONT_MAP = {
-    "monotype corsiva": "SERIF",
-    "abel": "SANS",
+# Production amazon_parser.py ile birebir eşleşen mapping'ler
+FONT_MAPPING = {
+    "Monotype Corsiva": "SERIF",
+    "Abel": "SANS",
     "elegant script": "SCRIPT",
+    "classic serif": "SERIF",
+    "modern sans": "SANS",
     "welcome christmas": "WELCOME",
 }
 
-VALID_COLORS = {"BLACK", "WHITE", "GOLD", "RED", "SILVER", "IVORY"}
+COLOR_MAPPING = {
+    "Black (#000000)": "BLACK",
+    "White (#ffffff)": "WHITE",
+    "Gold": "GOLD",
+    "Red": "RED",
+    "Silver": "SILVER",
+    "Ivory": "IVORY",
+}
+
 VALID_FONTS = {"SERIF", "SANS", "SCRIPT", "WELCOME"}
+VALID_COLORS = {"BLACK", "WHITE", "GOLD", "RED", "SILVER", "IVORY"}
 
 
 class ParseError(Exception):
@@ -26,239 +36,217 @@ class AmazonParser:
             raise FileNotFoundError(f"Dosya bulunamadı: {filepath}")
 
     def parse(self) -> tuple[list[dict], list[str]]:
-        """
-        (orders, warnings) döner.
-        orders: başarıyla parse edilen sipariş listesi
-        warnings: parse edilemeyen satırlar için mesajlar
-        """
-        suffix = self.filepath.suffix.lower()
-        raw_text = self.filepath.read_text(encoding="utf-8", errors="replace")
+        """(orders, warnings) döner."""
+        content = self.filepath.read_text(encoding="utf-8", errors="replace")
+        if self._is_html(content):
+            return self._parse_html(content)
+        return self._parse_txt(content)
 
-        if suffix in (".html", ".htm"):
-            return self._parse_html(raw_text)
-        else:
-            return self._parse_txt(raw_text)
+    def _is_html(self, content: str) -> bool:
+        return "<!doctype html" in content[:1000].lower() or "<html" in content[:1000].lower()
 
-    def _parse_html(self, raw_text: str) -> tuple[list[dict], list[str]]:
-        soup = BeautifulSoup(raw_text, "lxml")
+    # ──────────────────────────────────────────────
+    # HTML PARSE — production amazon_parser.py mantığı
+    # ──────────────────────────────────────────────
+    def _parse_html(self, content: str) -> tuple[list[dict], list[str]]:
         orders, warnings = [], []
 
-        # Amazon packing slip'te her sipariş satırı genellikle bir tablo satırında (<tr>) bulunur.
-        # Sipariş ID'si sayfanın üst bölümünde yer alır.
-        order_id = self._extract_order_id_html(soup)
+        # Her order bloğunu "Order ID:" ile böl (production pattern)
+        order_pattern = r"Order ID:\s*([0-9\-]+)"
+        order_matches = list(re.finditer(order_pattern, content))
 
-        # Sipariş item satırlarını bul
-        rows = self._find_item_rows(soup)
-
-        if not rows:
-            # Tek sipariş sayfası olarak dene
-            try:
-                order = self._parse_single_html(soup, order_id)
-                orders.append(order)
-            except ParseError as e:
-                warnings.append(str(e))
+        if not order_matches:
+            warnings.append("HTML'de 'Order ID:' pattern bulunamadı.")
             return orders, warnings
 
-        for i, row in enumerate(rows):
+        for i, match in enumerate(order_matches):
+            order_id = match.group(1).strip()
+            start_pos = match.start()
+            end_pos = order_matches[i + 1].start() if i + 1 < len(order_matches) else len(content)
+            block = content[start_pos:end_pos]
+
             try:
-                order = self._parse_row_html(row, soup, order_id)
+                order = self._parse_html_block(block, order_id)
                 orders.append(order)
             except ParseError as e:
-                warnings.append(f"Satır {i+1}: {e}")
+                warnings.append(f"Order {order_id}: {e}")
 
         return orders, warnings
 
-    def _extract_order_id_html(self, soup: BeautifulSoup) -> str:
-        # "Order #" veya "Sipariş #" içeren text
-        text = soup.get_text(" ")
-        m = re.search(r"Order\s*#?\s*([0-9]{3}-[0-9]{7}-[0-9]{7})", text, re.IGNORECASE)
-        if m:
-            return m.group(1)
-        # Daha geniş format
-        m = re.search(r"([0-9]{3}-[0-9]+-[0-9]+)", text)
-        return m.group(1) if m else ""
+    def _parse_html_block(self, block: str, order_id: str) -> dict:
+        # SKU — 3 fallback pattern (production'la birebir)
+        sku = None
+        sku_patterns = [
+            r'SKU:\s*</span>\s*</span>\s*<span>\s*(\w+)',
+            r'SKU:\s*</span>\s*<span>\s*(\w+)',
+            r'<span>\s*(\w+)\s*</span>\s*</div>\s*<div[^>]*>\s*<span[^>]*>\s*ASIN:',
+        ]
+        for pat in sku_patterns:
+            m = re.search(pat, block, re.DOTALL)
+            if m:
+                sku = m.group(1).strip()
+                break
 
-    def _find_item_rows(self, soup: BeautifulSoup) -> list:
-        # Amazon packing slip'te "Merchant SKU" veya "ASIN" başlıklı sütun içeren tabloyu bul
-        tables = soup.find_all("table")
-        for table in tables:
-            headers = [th.get_text(strip=True).lower() for th in table.find_all("th")]
-            if any(h in headers for h in ["merchant sku", "sku", "asin", "quantity", "qty"]):
-                return table.find_all("tr")[1:]  # başlık satırını atla
-        return []
+        if not sku:
+            raise ParseError("SKU bulunamadı")
 
-    def _parse_row_html(self, row, soup: BeautifulSoup, order_id: str) -> dict:
-        cells = [td.get_text(" ", strip=True) for td in row.find_all("td")]
-        if not cells:
-            raise ParseError("Boş satır")
-
-        # Sütun sırasını dinamik belirle
-        headers = self._get_table_headers(row)
-        raw = self._cells_to_dict(headers, cells)
-
-        sku = raw.get("merchant sku") or raw.get("sku") or raw.get("asin") or ""
-        qty_str = raw.get("quantity") or raw.get("qty") or "1"
-        order_item_id = raw.get("order item id") or raw.get("order-item-id") or ""
-
-        custom_text = raw.get("customization") or raw.get("personalization") or ""
-        custom = self._parse_customization(custom_text)
-
-        return self._build_order_dict(
-            order_id=order_id,
-            order_item_id=order_item_id,
-            sku=sku.strip(),
-            qty=qty_str,
-            custom=custom,
+        # Order Item ID
+        item_id_match = re.search(
+            r'myo-order-details-product-order-item-id[^>]*>\s*(\d+)', block
         )
+        order_item_id = item_id_match.group(1).strip() if item_id_match else f"{order_id}-1"
 
-    def _get_table_headers(self, row) -> list[str]:
-        table = row.find_parent("table")
-        if not table:
-            return []
-        header_row = table.find("tr")
-        if not header_row:
-            return []
-        return [th.get_text(strip=True).lower() for th in header_row.find_all(["th", "td"])]
-
-    def _cells_to_dict(self, headers: list[str], cells: list[str]) -> dict:
-        d = {}
-        for i, h in enumerate(headers):
-            if i < len(cells):
-                d[h] = cells[i]
-        return d
-
-    def _parse_single_html(self, soup: BeautifulSoup, order_id: str) -> dict:
-        text = soup.get_text("\n")
-        return self._parse_from_text(text, order_id)
-
-    def _parse_txt(self, raw_text: str) -> tuple[list[dict], list[str]]:
-        orders, warnings = [], []
-        # Birden fazla sipariş bloğu için split — "Order #" ile ayır
-        blocks = re.split(r"(?=Order\s*#?\s*[0-9]{3}-)", raw_text, flags=re.IGNORECASE)
-        blocks = [b.strip() for b in blocks if b.strip()]
-
-        if not blocks:
-            blocks = [raw_text]
-
-        for i, block in enumerate(blocks):
-            try:
-                order_id = self._extract_order_id_txt(block)
-                order = self._parse_from_text(block, order_id)
-                orders.append(order)
-            except ParseError as e:
-                warnings.append(f"Blok {i+1}: {e}")
-
-        return orders, warnings
-
-    def _extract_order_id_txt(self, text: str) -> str:
-        m = re.search(r"([0-9]{3}-[0-9]{7}-[0-9]{7})", text)
-        if m:
-            return m.group(1)
-        m = re.search(r"([0-9]{3}-[0-9]+-[0-9]+)", text)
-        return m.group(1) if m else ""
-
-    def _parse_from_text(self, text: str, order_id: str) -> dict:
-        sku = self._regex_extract(text, r"(?:Merchant\s*SKU|SKU)[:\s]+([A-Z0-9]+)")
-        qty_str = self._regex_extract(text, r"(?:Quantity|Qty)[:\s]+([0-9]+)") or "1"
-        order_item_id = self._regex_extract(
-            text, r"(?:Order\s*Item\s*ID|order-item-id)[:\s]+([0-9]+)"
-        ) or ""
-
-        # Kişiselleştirme bloğu
-        custom_match = re.search(
-            r"(?:Customization|Personalization)[:\s]*(.*?)(?=\n\n|\Z)",
-            text,
-            re.IGNORECASE | re.DOTALL,
+        # Quantity
+        qty_match = re.search(
+            r'<td[^>]*class="[^"]*table-border[^"]*"[^>]*>\s*(\d+)\s*</td>', block
         )
-        custom_text = custom_match.group(1) if custom_match else text
-        custom = self._parse_customization(custom_text)
+        qty = int(qty_match.group(1)) if qty_match else 1
 
-        return self._build_order_dict(
-            order_id=order_id,
-            order_item_id=order_item_id,
-            sku=sku.strip() if sku else "",
-            qty=qty_str,
-            custom=custom,
-        )
+        # Customizations
+        custom = self._extract_html_customizations(block)
 
-    def _regex_extract(self, text: str, pattern: str) -> str:
-        m = re.search(pattern, text, re.IGNORECASE)
-        return m.group(1).strip() if m else ""
+        return self._build_order_dict(order_id, order_item_id, sku, qty, custom)
 
-    def _parse_customization(self, text: str) -> dict:
-        result = {}
-        if not text:
-            return result
+    def _extract_html_customizations(self, block: str) -> dict:
+        """Production parser'la birebir — span pattern ile field extraction."""
+        customizations = {}
+        fields = ["NAME", "YEAR", "MESSAGE", "Font", "Color"]
 
-        # "Key: Value" satırları
-        pairs = re.findall(r"([A-Za-z0-9_ ]+?)\s*:\s*([^\n|;]+)", text)
-        kv = {k.strip().lower(): v.strip() for k, v in pairs}
+        for field in fields:
+            pattern = rf'<span[^>]*>\s*{field}:\s*</span>\s*<span>\s*([^<]+?)\s*</span>'
+            match = re.search(pattern, block, re.IGNORECASE | re.DOTALL)
+            if match:
+                value = re.sub(r'\s+', ' ', match.group(1).strip())
+                customizations[field.lower()] = value
 
-        # name, name2..name10
-        for i in range(1, 11):
-            key = "name" if i == 1 else f"name{i}"
-            raw_key_variants = [key, f"name {i}" if i > 1 else "name", f"recipient{i}"]
-            for rk in raw_key_variants:
-                if rk in kv and kv[rk]:
-                    result[key] = kv[rk]
-                    break
-
-        result["year"] = kv.get("year", "")
-        result["message"] = kv.get("message", kv.get("text", ""))
-
-        # Font mapping
-        raw_font = kv.get("font", kv.get("font option", kv.get("font style", "")))
-        result["font_option"] = self._map_font(raw_font)
-
-        # Color mapping
-        raw_color = kv.get("color", kv.get("color option", kv.get("colour", "")))
-        result["color_option"] = self._map_color(raw_color)
-
+        result = {
+            "name": customizations.get("name", ""),
+            "year": customizations.get("year", ""),
+            "message": customizations.get("message", ""),
+            "font_option": self._map_font(customizations.get("font", "")),
+            "color_option": self._map_color(customizations.get("color", "")),
+        }
         return result
 
+    # ──────────────────────────────────────────────
+    # TXT PARSE — production amazon_parser.py mantığı
+    # ──────────────────────────────────────────────
+    def _parse_txt(self, content: str) -> tuple[list[dict], list[str]]:
+        orders, warnings = [], []
+
+        # "Order ID:" ile böl (production pattern)
+        order_blocks = re.split(r"Order ID:\s*", content)
+
+        for block in order_blocks[1:]:
+            # Order ID
+            order_id_match = re.search(r'^([0-9\-]+)', block)
+            order_id = order_id_match.group(1) if order_id_match else "UNKNOWN"
+
+            # Quantity
+            qty_match = re.search(r'Quantity[^\n]*\n\s*(\d+)', block)
+            qty = int(qty_match.group(1)) if qty_match else 1
+
+            # Her SKU için ayrı sipariş (production ile aynı)
+            sku_matches = list(re.finditer(r'SKU:\s*(\w+)', block))
+            if not sku_matches:
+                warnings.append(f"Order {order_id}: SKU bulunamadı")
+                continue
+
+            for idx, sku_match in enumerate(sku_matches):
+                sku = sku_match.group(1)
+                start_pos = sku_match.end()
+                next_sku = re.search(r'SKU:', block[start_pos:])
+                end_pos = start_pos + next_sku.start() if next_sku else len(block)
+                sku_block = block[start_pos:end_pos]
+
+                name = self._extract_txt_field(sku_block, r'NAME:\s*(.+?)(?:\n|YEAR:|$)')
+                year = self._extract_txt_field(sku_block, r'YEAR:\s*(.+?)(?:\n|Font:|$)')
+                message = self._extract_txt_field(sku_block, r'MESSAGE:\s*(.+?)(?:\n|Font:|$)')
+                font = self._extract_txt_field(sku_block, r'Font:\s*(.+?)(?:\n|Color:|$)')
+                color = self._extract_txt_field(sku_block, r'Color:\s*(.+?)(?:\n|GIFT|$)')
+
+                custom = {
+                    "name": name or "",
+                    "year": year or "",
+                    "message": message or "",
+                    "font_option": self._map_font(font or ""),
+                    "color_option": self._map_color(color or ""),
+                }
+
+                try:
+                    order = self._build_order_dict(
+                        order_id=order_id,
+                        order_item_id=f"{order_id}-{idx + 1}",
+                        sku=sku,
+                        qty=qty,
+                        custom=custom,
+                    )
+                    orders.append(order)
+                except ParseError as e:
+                    warnings.append(f"Order {order_id} SKU {sku}: {e}")
+
+        return orders, warnings
+
+    def _extract_txt_field(self, text: str, pattern: str) -> Optional[str]:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            return re.sub(r'\s+', ' ', match.group(1).strip())
+        return None
+
+    # ──────────────────────────────────────────────
+    # MAPPING
+    # ──────────────────────────────────────────────
     def _map_font(self, raw: str) -> str:
         if not raw:
             return "SERIF"
-        lower = raw.lower().strip()
-        for key, val in FONT_MAP.items():
-            if key in lower:
+        # Tam eşleşme dene
+        if raw in FONT_MAPPING:
+            return FONT_MAPPING[raw]
+        # Büyük/küçük harf fark etmeksizin kısmi eşleşme
+        raw_lower = raw.lower()
+        for key, val in FONT_MAPPING.items():
+            if key.lower() in raw_lower:
                 return val
-        upper = raw.upper().strip()
-        if upper in VALID_FONTS:
-            return upper
+        # Zaten kod olarak gelmişse
+        if raw.upper() in VALID_FONTS:
+            return raw.upper()
         return "SERIF"
 
     def _map_color(self, raw: str) -> str:
         if not raw:
             return "BLACK"
-        upper = raw.upper().strip()
-        if upper in VALID_COLORS:
-            return upper
+        # Tam eşleşme dene (production COLOR_MAPPING)
+        if raw in COLOR_MAPPING:
+            return COLOR_MAPPING[raw]
+        # Büyük/küçük harf fark etmeksizin
+        raw_lower = raw.lower()
+        for key, val in COLOR_MAPPING.items():
+            if key.lower() in raw_lower:
+                return val
+        # Zaten kod olarak gelmişse
+        if raw.upper() in VALID_COLORS:
+            return raw.upper()
         return "BLACK"
 
+    # ──────────────────────────────────────────────
+    # ORTAK
+    # ──────────────────────────────────────────────
     def _build_order_dict(
         self,
         order_id: str,
         order_item_id: str,
         sku: str,
-        qty: str,
+        qty: int,
         custom: dict,
     ) -> dict:
         if not sku:
             raise ParseError("SKU bulunamadı")
-        if not order_item_id:
-            raise ParseError("Order Item ID bulunamadı")
-
-        try:
-            qty_int = int(qty)
-        except (ValueError, TypeError):
-            qty_int = 1
 
         order = {
             "order_id": order_id,
-            "order_item_id": order_item_id,
+            "order_item_id": str(order_item_id),
             "sku": sku,
-            "qty": qty_int,
+            "qty": int(qty),
             "name": custom.get("name", ""),
             "year": custom.get("year", ""),
             "message": custom.get("message", ""),
