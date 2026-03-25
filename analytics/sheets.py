@@ -48,20 +48,18 @@ LOG_COLUMNS = QUEUE_COLUMNS + ["processed_at"]
 
 
 def _build_gspread_client() -> gspread.Client:
-    """
-    Önce Streamlit Secrets'tan credentials okumayı dener (Cloud ortamı).
-    Bulunamazsa local credentials.json'a düşer.
-    """
     try:
         import streamlit as st
-        creds_dict = dict(st.secrets["gcp_service_account"])
-        creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
-        creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
-        return gspread.authorize(creds)
-    except Exception:
-        pass
+        if "gcp_service_account" in st.secrets:
+            creds_dict = dict(st.secrets["gcp_service_account"])
+            creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
+            creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
+            return gspread.authorize(creds)
+    except Exception as e:
+        import sys
+        print(f"Streamlit secrets error: {e}", file=sys.stderr)
 
-    # Local fallback: credentials.json
+    # Local fallback
     creds_path = Path(CREDENTIALS_PATH)
     if not creds_path.exists():
         raise FileNotFoundError(f"credentials.json bulunamadı: {creds_path}")
@@ -69,20 +67,22 @@ def _build_gspread_client() -> gspread.Client:
 
 
 def _get_spreadsheet_id() -> str:
-    """os.getenv'den okur; boşsa Streamlit Secrets'a bakar."""
-    sid = os.getenv("GOOGLE_SHEETS_SPREADSHEET_ID", "")
-    if not sid:
-        try:
-            import streamlit as st
-            sid = st.secrets.get("GOOGLE_SHEETS_SPREADSHEET_ID", "")
-        except Exception:
-            pass
-    return sid
+    env_id = os.getenv("GOOGLE_SHEETS_SPREADSHEET_ID", "")
+    if env_id:
+        return env_id
+    try:
+        import streamlit as st
+        return st.secrets["GOOGLE_SHEETS_SPREADSHEET_ID"]
+    except Exception:
+        return ""
+
+
+SPREADSHEET_ID = _get_spreadsheet_id()
 
 
 class SheetsClient:
     def __init__(self):
-        spreadsheet_id = _get_spreadsheet_id()
+        spreadsheet_id = SPREADSHEET_ID
         if not spreadsheet_id:
             raise ValueError("GOOGLE_SHEETS_SPREADSHEET_ID tanımlı değil (.env veya Streamlit Secrets)")
 
