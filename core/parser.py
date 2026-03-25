@@ -30,17 +30,34 @@ class ParseError(Exception):
 
 
 class AmazonParser:
-    def __init__(self, filepath: str):
-        self.filepath = Path(filepath)
-        if not self.filepath.exists():
+    def __init__(self, filepath: Optional[str] = None):
+        self.filepath = Path(filepath) if filepath else None
+        if self.filepath and not self.filepath.exists():
             raise FileNotFoundError(f"Dosya bulunamadı: {filepath}")
 
     def parse(self) -> tuple[list[dict], list[str]]:
         """(orders, warnings) döner."""
+        if not self.filepath:
+            raise ValueError("filepath belirtilmedi. parse_file(path) kullanın.")
         content = self.filepath.read_text(encoding="utf-8", errors="replace")
         if self._is_html(content):
             return self._parse_html(content)
         return self._parse_txt(content)
+
+    def parse_file(self, filepath: str) -> list[dict]:
+        """Production API uyumlu: AmazonParser().parse_file(path) → orders listesi döner."""
+        self.filepath = Path(filepath)
+        if not self.filepath.exists():
+            raise FileNotFoundError(f"Dosya bulunamadı: {filepath}")
+        orders, _ = self.parse()
+        return orders
+
+    def parse_files(self, file_paths: list[str]) -> list[dict]:
+        """Birden fazla dosyayı parse et, tüm siparişleri birleştir."""
+        all_orders = []
+        for fp in file_paths:
+            all_orders.extend(self.parse_file(fp))
+        return all_orders
 
     def _is_html(self, content: str) -> bool:
         return "<!doctype html" in content[:1000].lower() or "<html" in content[:1000].lower()
