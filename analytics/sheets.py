@@ -16,6 +16,7 @@ from pathlib import Path
 
 import gspread
 from dotenv import load_dotenv
+from google.oauth2.service_account import Credentials
 from gspread.exceptions import APIError, SpreadsheetNotFound
 
 load_dotenv()
@@ -29,6 +30,11 @@ SPREADSHEET_ID = os.getenv("GOOGLE_SHEETS_SPREADSHEET_ID", "")
 QUEUE_SHEET = os.getenv("GOOGLE_SHEETS_QUEUE_SHEET", "Queue")
 LOG_SHEET = os.getenv("GOOGLE_SHEETS_LOG_SHEET", "Log")
 
+SCOPES = [
+    "https://spreadsheets.google.com/feeds",
+    "https://www.googleapis.com/auth/drive",
+]
+
 # ── Sütun düzeni ────────────────────────────────────────────────────────────
 QUEUE_COLUMNS = [
     "order_id", "order_item_id", "sku", "qty",
@@ -41,15 +47,33 @@ QUEUE_COLUMNS = [
 LOG_COLUMNS = QUEUE_COLUMNS + ["processed_at"]
 
 
+def _build_gspread_client() -> gspread.Client:
+    """
+    Önce Streamlit Secrets'tan credentials okumayı dener (Cloud ortamı).
+    Bulunamazsa local credentials.json'a düşer.
+    """
+    try:
+        import streamlit as st
+        creds_dict = dict(st.secrets["gcp_service_account"])
+        creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
+        creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
+        return gspread.authorize(creds)
+    except Exception:
+        pass
+
+    # Local fallback: credentials.json
+    creds_path = Path(CREDENTIALS_PATH)
+    if not creds_path.exists():
+        raise FileNotFoundError(f"credentials.json bulunamadı: {creds_path}")
+    return gspread.service_account(filename=str(creds_path))
+
+
 class SheetsClient:
     def __init__(self):
-        creds_path = Path(CREDENTIALS_PATH)
-        if not creds_path.exists():
-            raise FileNotFoundError(f"credentials.json bulunamadı: {creds_path}")
         if not SPREADSHEET_ID:
             raise ValueError("GOOGLE_SHEETS_SPREADSHEET_ID .env'de tanımlı değil")
 
-        gc = gspread.service_account(filename=str(creds_path))
+        gc = _build_gspread_client()
         try:
             self._spreadsheet = gc.open_by_key(SPREADSHEET_ID)
         except SpreadsheetNotFound:
