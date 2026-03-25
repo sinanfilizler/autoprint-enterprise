@@ -1,3 +1,4 @@
+import os
 import sys
 import tempfile
 from pathlib import Path
@@ -82,6 +83,8 @@ with tab_upload:
                 tmp.write(uf.read())
                 tmp_path = tmp.name
 
+            st.write(f"Dosya yolu: {tmp_path}, Boyut: {os.path.getsize(tmp_path)}")
+
             try:
                 parser = AmazonParser(tmp_path)
                 parsed, warnings = parser.parse()
@@ -89,6 +92,8 @@ with tab_upload:
                 all_warnings.extend([f"[{uf.name}] {w}" for w in warnings])
             except (FileNotFoundError, ParseError) as e:
                 all_warnings.append(f"[{uf.name}] {e}")
+            except Exception as e:
+                st.error(f"[{uf.name}] Beklenmeyen hata: {type(e).__name__}: {e}")
 
         if all_warnings:
             with st.expander(f"⚠️ {len(all_warnings)} uyarı"):
