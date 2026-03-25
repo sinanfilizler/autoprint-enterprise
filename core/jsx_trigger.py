@@ -1,0 +1,105 @@
+import os
+import subprocess
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+load_dotenv()
+
+JSX_SCRIPT_PATH = os.getenv(
+    "JSX_SCRIPT_PATH",
+    str(Path.home() / "Desktop/AutoPrint/scripts/JSX/Render_Sheet.jsx"),
+)
+
+TEMPLATE_BASE = os.getenv(
+    "TEMPLATE_BASE",
+    str(Path.home() / "Desktop/AutoPrint/templates"),
+)
+
+COLOR_RGB = {
+    "BLACK":  (0, 0, 0),
+    "WHITE":  (240, 240, 240),
+    "IVORY":  (255, 255, 240),
+    "RED":    (180, 30, 40),
+    "GOLD":   (200, 160, 60),
+    "SILVER": (180, 180, 180),
+}
+
+OSASCRIPT_TIMEOUT = int(os.getenv("OSASCRIPT_TIMEOUT", "3600"))
+
+
+def detect_product_type(sku: str) -> str:
+    if sku.startswith("ACRY2"):
+        return "dog_round"
+
+    template_base = Path(TEMPLATE_BASE)
+
+    if (template_base / "snowglobe" / f"{sku}.ai").exists():
+        return "snowglobe"
+
+    if (template_base / "heart_ceramic" / f"{sku}.ai").exists():
+        return "heart_ceramic"
+
+    return "round_ceramic"
+
+
+def resolve_font(product_type: str, font_option: str) -> str:
+    if product_type == "dog_round":
+        return "WelcomeChristmas"
+    if product_type == "snowglobe":
+        return "JosephSophia"
+    if font_option == "WELCOME":
+        return "WelcomeChristmas"
+    return "MonotypeCorsiva"
+
+
+def resolve_color_rgb(product_type: str, color_option: str) -> tuple[int, int, int]:
+    if product_type == "dog_round":
+        return COLOR_RGB["IVORY"]
+    return COLOR_RGB.get(color_option, COLOR_RGB["BLACK"])
+
+
+class JSXTrigger:
+    def __init__(self):
+        self.jsx_path = Path(JSX_SCRIPT_PATH)
+        self._check_osascript()
+
+    def _check_osascript(self) -> None:
+        result = subprocess.run(["which", "osascript"], capture_output=True)
+        if result.returncode != 0:
+            print("[UYARI] osascript bulunamadı — macOS dışında çalışıyor olabilirsiniz.")
+
+    def trigger_batch(self, orders: list[dict]) -> dict:
+        if not self.jsx_path.exists():
+            return {
+                "success": False,
+                "output": "",
+                "error": f"JSX script bulunamadı: {self.jsx_path}",
+            }
+        success, out, err = self._run_osascript()
+        return {"success": success, "output": out, "error": err}
+
+    def trigger_single(self, order: dict) -> dict:
+        return self.trigger_batch([order])
+
+    def _run_osascript(self) -> tuple[bool, str, str]:
+        script = (
+            f'tell application "Adobe Illustrator" to '
+            f'do javascript file "{self.jsx_path}"'
+        )
+        try:
+            result = subprocess.run(
+                ["osascript", "-e", script],
+                capture_output=True,
+                text=True,
+                timeout=OSASCRIPT_TIMEOUT,
+            )
+            return (
+                result.returncode == 0,
+                result.stdout.strip(),
+                result.stderr.strip(),
+            )
+        except subprocess.TimeoutExpired:
+            return False, "", f"osascript timeout ({OSASCRIPT_TIMEOUT}s) aşıldı"
+        except FileNotFoundError:
+            return False, "", "osascript bulunamadı — sadece macOS'ta çalışır"
