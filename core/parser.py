@@ -77,9 +77,8 @@ class AmazonParser:
         # SKU — 3 fallback pattern (production'la birebir)
         sku = None
         sku_patterns = [
-            r'SKU:\s*</span>\s*</span>\s*<span>\s*(\w+)',
-            r'SKU:\s*</span>\s*<span>\s*(\w+)',
-            r'<span>\s*(\w+)\s*</span>\s*</div>\s*<div[^>]*>\s*<span[^>]*>\s*ASIN:',
+            r'SKU:\s*</span>\s*(?:\s*<[^>]+>\s*)*\s*<span>\s*([^<]+?)\s*</span>',
+            r'<span>\s*([^<]+?)\s*</span>\s*</div>\s*<div[^>]*>\s*<span[^>]*>\s*ASIN:',
         ]
         for pat in sku_patterns:
             m = re.search(pat, block, re.DOTALL)
