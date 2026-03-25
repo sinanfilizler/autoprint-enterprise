@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from core.order_manager import OrderManager
 from core.parser import AmazonParser, ParseError
-from core.jsx_trigger import detect_product_type, resolve_font
+from core.jsx_trigger import JSXTrigger, detect_product_type, resolve_font
 
 st.set_page_config(
     page_title="AutoPrint Enterprise",
@@ -183,6 +183,48 @@ with tab_queue:
     else:
         df = _orders_to_df(orders)
         st.dataframe(df, use_container_width=True)
+
+        st.divider()
+
+        col_send, col_dry = st.columns(2)
+
+        with col_send:
+            if st.button("🖨️ Illustrator'a Gönder", type="primary", use_container_width=True):
+                jsx = JSXTrigger()
+                with st.spinner(f"{len(orders)} sipariş Illustrator'a gönderiliyor..."):
+                    result = jsx.trigger_batch(orders)
+                if result["success"]:
+                    for order in orders:
+                        order_mgr.mark_processed(
+                            str(order["order_item_id"]),
+                            bool(order.get("is_manual", False)),
+                        )
+                        order_mgr.remove_order(str(order["order_item_id"]))
+                    st.success(f"{len(orders)} sipariş Illustrator'a gönderildi ve kuyruktan çıkarıldı.")
+                    if result["output"]:
+                        st.code(result["output"])
+                    st.rerun()
+                else:
+                    st.error(f"Gönderim başarısız: {result['error']}")
+                    if result["output"]:
+                        st.code(result["output"])
+
+        with col_dry:
+            if st.button("🧪 Test Et (Dry-Run)", type="secondary", use_container_width=True):
+                lines = []
+                for order in orders:
+                    pt = detect_product_type(order["sku"])
+                    font = resolve_font(pt, order.get("font_option", "SERIF"))
+                    lines.append(
+                        f"• [{order['order_item_id']}] SKU={order['sku']} "
+                        f"→ tip={pt} font={font} renk={order.get('color_option','?')} "
+                        f"isim={order.get('name','?')} "
+                        f"{'[MANUEL]' if order.get('is_manual') else ''}"
+                    )
+                jsx = JSXTrigger()
+                lines.append(f"\nJSX script: {jsx.jsx_path}")
+                lines.append(f"orders.json: {order_mgr.orders_path}")
+                st.info("**Dry-Run — JSX tetiklenmedi:**\n\n" + "\n".join(lines))
 
         st.divider()
         st.write("**Sipariş Sil:**")
