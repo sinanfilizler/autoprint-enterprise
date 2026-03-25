@@ -344,6 +344,19 @@ with tab_dashboard:
 with tab_admin:
     st.subheader("Admin Paneli")
 
+    # ── Secrets debug ──────────────────────────────────────────────────────
+    with st.expander("🔍 Secrets Debug", expanded=True):
+        st.write("Secrets keys:", list(st.secrets.keys()))
+        if "gcp_service_account" in st.secrets:
+            st.write("gcp_service_account found")
+        else:
+            st.warning("gcp_service_account bulunamadı")
+        if "GOOGLE_SHEETS_SPREADSHEET_ID" in st.secrets:
+            st.write("SPREADSHEET_ID found:", st.secrets["GOOGLE_SHEETS_SPREADSHEET_ID"])
+        else:
+            st.warning("GOOGLE_SHEETS_SPREADSHEET_ID bulunamadı")
+    # ── /Secrets debug ─────────────────────────────────────────────────────
+
     # Bağlantı durumu
     st.write("### Bağlantı Durumu")
     if sc:
