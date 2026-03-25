@@ -48,22 +48,31 @@ LOG_COLUMNS = QUEUE_COLUMNS + ["processed_at"]
 
 
 def _build_gspread_client() -> gspread.Client:
+    # 1. Streamlit Secrets (Cloud ortamı)
     try:
         import streamlit as st
+        import sys
+        print(f"Streamlit secrets keys: {list(st.secrets.keys())}", file=sys.stderr)
         if "gcp_service_account" in st.secrets:
             creds_dict = dict(st.secrets["gcp_service_account"])
             creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
             creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
             return gspread.authorize(creds)
+        else:
+            print("gcp_service_account bulunamadı — Streamlit Secrets'a eklenmemiş", file=sys.stderr)
     except Exception as e:
         import sys
         print(f"Streamlit secrets error: {e}", file=sys.stderr)
 
-    # Local fallback
+    # 2. Lokal fallback: credentials.json
     creds_path = Path(CREDENTIALS_PATH)
-    if not creds_path.exists():
-        raise FileNotFoundError(f"credentials.json bulunamadı: {creds_path}")
-    return gspread.service_account(filename=str(creds_path))
+    if creds_path.exists():
+        return gspread.service_account(filename=str(creds_path))
+
+    raise RuntimeError(
+        "Google credentials bulunamadı. Streamlit Cloud için Secrets'a "
+        "[gcp_service_account] ekle. Lokal için credentials.json yerleştir."
+    )
 
 
 def _get_spreadsheet_id() -> str:
