@@ -11,6 +11,7 @@ Her iki sheet'te duplicate kontrolü order_item_id üzerinden yapılır.
 """
 
 import os
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -89,6 +90,8 @@ class SheetsClient:
 
         self._queue = self._get_or_create_sheet(QUEUE_SHEET, QUEUE_COLUMNS)
         self._log = self._get_or_create_sheet(LOG_SHEET, LOG_COLUMNS)
+
+        self._cache: dict = {}  # key → (timestamp, value)
 
     # ── Sheet yönetimi ───────────────────────────────────────────────────────
 
@@ -173,6 +176,8 @@ class SheetsClient:
 
         if rows_to_add:
             self._queue.append_rows(rows_to_add, value_input_option="RAW")
+            self._cache.pop("queue", None)
+            self._cache.pop("row_counts", None)
 
         return {
             "added": len(rows_to_add),
@@ -181,8 +186,13 @@ class SheetsClient:
         }
 
     def get_queue(self) -> list[dict]:
-        """Queue sheet'indeki tüm aktif siparişleri döner."""
-        return self._sheet_to_dicts(self._queue)
+        """Queue sheet'indeki tüm aktif siparişleri döner (30s cache)."""
+        cached = self._cache.get("queue")
+        if cached and time.monotonic() - cached[0] < 30:
+            return cached[1]
+        result = self._sheet_to_dicts(self._queue)
+        self._cache["queue"] = (time.monotonic(), result)
+        return result
 
     def mark_processed(self, order_item_id: str) -> bool:
         """
@@ -194,7 +204,9 @@ class SheetsClient:
         # Queue'da satırı bul
         try:
             cell = self._queue.find(oid, in_column=QUEUE_COLUMNS.index("order_item_id") + 1)
-        except gspread.CellNotFound:
+        except Exception:
+            return False
+        if cell is None:
             return False
 
         row_data = self._queue.row_values(cell.row)
@@ -207,6 +219,8 @@ class SheetsClient:
 
         self._log.append_row(log_row, value_input_option="RAW")
         self._queue.delete_rows(cell.row)
+        self._cache.pop("queue", None)
+        self._cache.pop("row_counts", None)
         return True
 
     def remove_from_queue(self, order_item_id: str) -> bool:
@@ -214,9 +228,13 @@ class SheetsClient:
         oid = str(order_item_id).strip()
         try:
             cell = self._queue.find(oid, in_column=QUEUE_COLUMNS.index("order_item_id") + 1)
-        except gspread.CellNotFound:
+        except Exception:
+            return False
+        if cell is None:
             return False
         self._queue.delete_rows(cell.row)
+        self._cache.pop("queue", None)
+        self._cache.pop("row_counts", None)
         return True
 
     def get_log(self) -> list[dict]:
@@ -224,11 +242,16 @@ class SheetsClient:
         return self._sheet_to_dicts(self._log)
 
     def row_counts(self) -> dict[str, int]:
-        """Queue ve Log sheet'lerindeki veri satırı sayılarını döner (başlık hariç)."""
-        return {
+        """Queue ve Log sheet'lerindeki veri satırı sayılarını döner (30s cache)."""
+        cached = self._cache.get("row_counts")
+        if cached and time.monotonic() - cached[0] < 30:
+            return cached[1]
+        result = {
             "queue": max(0, len(self._queue.get_all_values()) - 1),
             "log": max(0, len(self._log.get_all_values()) - 1),
         }
+        self._cache["row_counts"] = (time.monotonic(), result)
+        return result
 
     def clear_queue(self) -> int:
         """Queue sheet'ini temizler (başlık satırı kalır). Silinen satır sayısını döner."""
@@ -236,4 +259,6 @@ class SheetsClient:
         count = max(0, len(all_rows) - 1)
         if count:
             self._queue.delete_rows(2, len(all_rows))
+            self._cache.pop("queue", None)
+            self._cache.pop("row_counts", None)
         return count

@@ -22,7 +22,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from core.order_manager import OrderManager
+from analytics.sheets import SheetsClient
 from core.jsx_trigger import JSXTrigger
 
 BATCH_LOG_BASE = os.getenv(
@@ -43,7 +43,7 @@ class AutoPrintWatchdog:
         self.poll_interval = poll_interval
         self.dry_run = dry_run
         self._running = False
-        self.order_mgr = OrderManager()
+        self.sc = SheetsClient()
         self.jsx = None if dry_run else JSXTrigger()
 
         signal.signal(signal.SIGINT, self._graceful_shutdown)
@@ -65,7 +65,7 @@ class AutoPrintWatchdog:
         log.info("Watchdog durduruldu.")
 
     def _poll(self) -> None:
-        orders = self.order_mgr.load_orders()
+        orders = self.sc.get_queue()
 
         if not orders:
             log.info("Kuyruk boş, bekleniyor...")
@@ -91,9 +91,11 @@ class AutoPrintWatchdog:
             log.info(f"Batch başarılı: {batch_id}")
             for order in orders:
                 order_item_id = str(order.get("order_item_id", ""))
-                is_manual = bool(order.get("is_manual", False))
-                self.order_mgr.mark_processed(order_item_id, is_manual)
-                self.order_mgr.remove_order(order_item_id)
+                ok = self.sc.mark_processed(order_item_id)
+                if ok:
+                    log.debug(f"  ✓ {order_item_id} Log'a taşındı.")
+                else:
+                    log.warning(f"  ✗ {order_item_id} mark_processed başarısız.")
             log.info(f"{len(orders)} sipariş işlendi ve kuyruktan çıkarıldı.")
         else:
             log.error(f"JSX başarısız — siparişler kuyrukta bırakıldı. Hata: {result['error']}")

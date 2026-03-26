@@ -9,6 +9,9 @@ import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from dotenv import load_dotenv
+load_dotenv()
+
 from core.order_manager import OrderManager
 from core.parser import AmazonParser, ParseError
 from core.jsx_trigger import JSXTrigger, detect_product_type, resolve_font
@@ -18,6 +21,24 @@ st.set_page_config(
     page_icon="🖨️",
     layout="wide",
 )
+
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
+
+
+# ── Şifre kontrolü ───────────────────────────────────────────────────────────
+def _check_auth() -> bool:
+    return st.session_state.get("authenticated", False)
+
+
+def _render_login_sidebar() -> None:
+    st.sidebar.markdown("### Giriş")
+    pwd = st.sidebar.text_input("Şifre", type="password", key="pwd_input")
+    if st.sidebar.button("Giriş Yap"):
+        if ADMIN_PASSWORD and pwd == ADMIN_PASSWORD:
+            st.session_state["authenticated"] = True
+            st.rerun()
+        else:
+            st.sidebar.error("Hatalı şifre.")
 
 
 # ── Google Sheets bağlantısı (uygulama ömrü boyunca tek instance) ────────────
@@ -70,8 +91,17 @@ def _validate_manual(order_id, order_item_id, sku, name) -> list[str]:
     return errors
 
 
-# ── Başlık + bağlantı durumu sidebar ────────────────────────────────────────
+# ── Başlık + auth ────────────────────────────────────────────────────────────
 st.title("AutoPrint Enterprise")
+
+authenticated = _check_auth()
+
+if not authenticated:
+    _render_login_sidebar()
+else:
+    if st.sidebar.button("Çıkış Yap"):
+        st.session_state["authenticated"] = False
+        st.rerun()
 
 sc = _sheets()
 if sc:
@@ -80,9 +110,12 @@ else:
     err = st.session_state.get("sheets_error", "Bilinmeyen hata")
     st.sidebar.error(f"Sheets bağlantısı yok:\n{err}")
 
-tab_upload, tab_queue, tab_dashboard, tab_admin = st.tabs(
-    ["📤 Yükle", "📋 Kuyruk", "📊 Dashboard", "⚙️ Admin"]
-)
+if authenticated:
+    tab_upload, tab_queue, tab_dashboard, tab_admin = st.tabs(
+        ["📤 Yükle", "📋 Kuyruk", "📊 Dashboard", "⚙️ Admin"]
+    )
+else:
+    (tab_upload,) = st.tabs(["📤 Yükle"])
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -194,8 +227,11 @@ with tab_upload:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# TAB 2: QUEUE
+# TAB 2: QUEUE  (sadece giriş yapılmışsa)
 # ──────────────────────────────────────────────────────────────────────────────
+if not authenticated:
+    st.stop()
+
 with tab_queue:
     col_title, col_refresh = st.columns([4, 1])
     with col_title:

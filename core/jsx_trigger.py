@@ -11,6 +11,11 @@ JSX_SCRIPT_PATH = os.getenv(
     str(Path.home() / "Desktop/AutoPrint/scripts/JSX/Render_Sheet.jsx"),
 )
 
+ORDERS_JSON_PATH = os.getenv(
+    "ORDERS_JSON_PATH",
+    str(Path.home() / "Desktop/AutoPrint/input/parsed_orders/orders.json"),
+)
+
 TEMPLATE_BASE = os.getenv(
     "TEMPLATE_BASE",
     str(Path.home() / "Desktop/AutoPrint/templates"),
