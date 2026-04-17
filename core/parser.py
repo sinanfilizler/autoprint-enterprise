@@ -1,4 +1,5 @@
 import re
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -82,66 +83,124 @@ class AmazonParser:
             end_pos = order_matches[i + 1].start() if i + 1 < len(order_matches) else len(content)
             block = content[start_pos:end_pos]
 
-            try:
-                order = self._parse_html_block(block, order_id)
-                orders.append(order)
-            except ParseError as e:
-                warnings.append(f"Order {order_id}: {e}")
+            # Seller name — order bloğundan çek
+            seller_m = re.search(
+                r'Thank you for buying from ([^<\n]+?) on Amazon Marketplace',
+                block, re.IGNORECASE
+            )
+            seller_name = seller_m.group(1).strip() if seller_m else ""
+
+            # Order date
+            date_m = re.search(
+                r'\b(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),\s+([A-Za-z]+\s+\d+,\s+\d{4})\b',
+                block
+            )
+            order_date = ""
+            if date_m:
+                try:
+                    order_date = datetime.strptime(date_m.group(1).strip(), "%b %d, %Y").strftime("%Y-%m-%d")
+                except ValueError:
+                    order_date = ""
+
+            block_orders = self._parse_html_block(block, order_id, seller_name, order_date)
+            if block_orders:
+                orders.extend(block_orders)
+            else:
+                warnings.append(f"Order {order_id}: SKU bulunamadı")
 
         return orders, warnings
 
-    def _parse_html_block(self, block: str, order_id: str) -> dict:
-        # SKU — 3 fallback pattern (production'la birebir)
-        sku = None
-        sku_patterns = [
-            r'SKU:\s*</span>\s*<span>\s*([^<]+?)\s*</span>',
-            r'<span>\s*([^<]+?)\s*</span>\s*</div>\s*<div[^>]*>\s*<span[^>]*>\s*ASIN:',
-        ]
-        for pat in sku_patterns:
-            m = re.search(pat, block, re.DOTALL)
-            if m:
-                sku = m.group(1).strip()
-                break
+    def _parse_html_block(self, block: str, order_id: str, seller_name: str = "", order_date: str = "") -> list[dict]:
+        """Bir order bloğundaki tüm item'ları parse eder. Her SKU için ayrı dict döner."""
+        sku_pattern = r'SKU:\s*</span>\s*<span>\s*([^<]+?)\s*</span>'
+        sku_matches = list(re.finditer(sku_pattern, block))
 
-        if not sku:
-            raise ParseError("SKU bulunamadı")
+        # Fallback: ASIN pattern ile tek SKU dene
+        if not sku_matches:
+            m = re.search(
+                r'<span>\s*([^<]+?)\s*</span>\s*</div>\s*<div[^>]*>\s*<span[^>]*>\s*ASIN:',
+                block, re.DOTALL
+            )
+            if not m:
+                return []
+            sku_matches = [m]
 
-        # Order Item ID
-        item_id_match = re.search(
-            r'myo-order-details-product-order-item-id[^>]*>\s*(\d+)', block
-        )
-        order_item_id = item_id_match.group(1).strip() if item_id_match else f"{order_id}-1"
+        orders = []
+        for idx, sm in enumerate(sku_matches):
+            sku = sm.group(1).strip()
+            sub_start = sm.start()
+            sub_end = sku_matches[idx + 1].start() if idx + 1 < len(sku_matches) else len(block)
+            sub = block[sub_start:sub_end]
 
-        # Quantity
-        qty_match = re.search(
-            r'<td[^>]*class="[^"]*table-border[^"]*"[^>]*>\s*(\d+)\s*</td>', block
-        )
-        qty = int(qty_match.group(1)) if qty_match else 1
+            # Order Item ID
+            item_id_match = re.search(
+                r'myo-order-details-product-order-item-id[^>]*>\s*(\d+)', sub
+            )
+            order_item_id = item_id_match.group(1).strip() if item_id_match else f"{order_id}-{idx + 1}"
 
-        # Customizations
-        custom = self._extract_html_customizations(block)
+            # Quantity
+            qty_match = re.search(
+                r'<td[^>]*class="[^"]*table-border[^"]*"[^>]*>\s*(\d+)\s*</td>', sub
+            )
+            qty = int(qty_match.group(1)) if qty_match else 1
 
-        return self._build_order_dict(order_id, order_item_id, sku, qty, custom)
+            # Customizations
+            custom = self._extract_html_customizations(sub)
+
+            # Item price — nested tag'leri atla, ilk sayıyı yakala
+            price_m = re.search(
+                r'myo-order-details-item-sub-total[^>]*>(?:[^$<]*(?:<[^>]+>[^$<]*)*)?\$\s*([\d,]+\.?\d*)',
+                sub, re.DOTALL
+            )
+            if not price_m:
+                price_m = re.search(r'myo-order-details-item-sub-total[^>]*>[^<]*\$?\s*([\d]+\.[\d]{2})', sub, re.DOTALL)
+            custom["item_price"] = float(price_m.group(1).replace(",", "")) if price_m else 0.0
+
+            # Shipping fee
+            ship_m = re.search(
+                r'myo-order-details-item-shipping-total[^>]*>(?:[^$<]*(?:<[^>]+>[^$<]*)*)?\$\s*([\d,]+\.?\d*)',
+                sub, re.DOTALL
+            )
+            if not ship_m:
+                ship_m = re.search(r'myo-order-details-item-shipping-total[^>]*>[^<]*\$?\s*([\d]+\.[\d]{2})', sub, re.DOTALL)
+            custom["shipping_fee"] = float(ship_m.group(1).replace(",", "")) if ship_m else 0.0
+            custom["seller_name"] = seller_name
+            custom["order_date"] = order_date
+
+            orders.append(self._build_order_dict(order_id, order_item_id, sku, qty, custom))
+
+        return orders
 
     def _extract_html_customizations(self, block: str) -> dict:
-        """Production parser'la birebir — span pattern ile field extraction."""
-        customizations = {}
-        fields = ["NAME", "YEAR", "MESSAGE", "Font", "Color"]
+        """Tüm NAME varyantlarını (NAME, NAME (DAD), NAME (MOM) vb.) sırayla çeker."""
 
-        for field in fields:
-            pattern = rf'<span[^>]*>\s*{field}:\s*</span>\s*<span>\s*([^<]+?)\s*</span>'
-            match = re.search(pattern, block, re.IGNORECASE | re.DOTALL)
-            if match:
-                value = re.sub(r'\s+', ' ', match.group(1).strip())
-                customizations[field.lower()] = value
+        # Tüm NAME varyantlarını pozisyon sırasıyla çek
+        name_pattern = r'<span[^>]*>\s*(NAME[^<:]*?):\s*</span>\s*<span>\s*([^<]+?)\s*</span>'
+        name_matches = re.findall(name_pattern, block, re.IGNORECASE | re.DOTALL)
+        names = [re.sub(r'\s+', ' ', v.strip()) for _, v in name_matches]
+
+        # YEAR, MESSAGE, Font, Color — tek değer
+        def _single(field):
+            m = re.search(
+                rf'<span[^>]*>\s*{re.escape(field)}:\s*</span>\s*<span>\s*([^<]+?)\s*</span>',
+                block, re.IGNORECASE | re.DOTALL
+            )
+            return re.sub(r'\s+', ' ', m.group(1).strip()) if m else ""
+
+        gift_raw = _single("GIFT BOX")
 
         result = {
-            "name": customizations.get("name", ""),
-            "year": customizations.get("year", ""),
-            "message": customizations.get("message", ""),
-            "font_option": self._map_font(customizations.get("font", "")),
-            "color_option": self._map_color(customizations.get("color", "")),
+            "name":         names[0] if len(names) > 0 else "",
+            "year":         _single("YEAR"),
+            "message":      _single("MESSAGE"),
+            "font_option":  self._map_font(_single("Font")),
+            "color_option": self._map_color(_single("Color")),
+            "gift_box":     "yes" in gift_raw.lower() if gift_raw else False,
         }
+        for i, n in enumerate(names[1:], start=2):
+            if i <= 10:
+                result[f"name{i}"] = n
+
         return result
 
     # ──────────────────────────────────────────────
@@ -161,6 +220,21 @@ class AmazonParser:
             # Quantity
             qty_match = re.search(r'Quantity[^\n]*\n\s*(\d+)', block)
             qty = int(qty_match.group(1)) if qty_match else 1
+
+            # Seller Name
+            seller_m = re.search(r'Seller Name:\s*\n[^\n]*\n[^\n]*\n[^\n]*\n([^\n]+)', block)
+            if not seller_m:
+                seller_m = re.search(r'Seller Name:\s+([^\n]+)', block)
+            seller_name = seller_m.group(1).strip() if seller_m else ""
+
+            # Order Date
+            date_m = re.search(r'\b(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),\s+([A-Za-z]+\s+\d+,\s+\d{4})\b', block)
+            order_date = ""
+            if date_m:
+                try:
+                    order_date = datetime.strptime(date_m.group(1).strip(), "%b %d, %Y").strftime("%Y-%m-%d")
+                except ValueError:
+                    order_date = ""
 
             # Her SKU için ayrı sipariş (production ile aynı)
             sku_matches = list(re.finditer(r'SKU:\s*(\w+)', block))
@@ -187,6 +261,8 @@ class AmazonParser:
                     "message": message or "",
                     "font_option": self._map_font(font or ""),
                     "color_option": self._map_color(color or ""),
+                    "seller_name": seller_name,
+                    "order_date": order_date,
                 }
 
                 try:
@@ -226,7 +302,8 @@ class AmazonParser:
         # Zaten kod olarak gelmişse
         if raw.upper() in VALID_FONTS:
             return raw.upper()
-        return "SERIF"
+        # Bilinmeyen font — raw değeri geçir, JSX kurulu olup olmadığını dener
+        return raw.strip()
 
     def _map_color(self, raw: str) -> str:
         if not raw:
@@ -259,16 +336,21 @@ class AmazonParser:
             raise ParseError("SKU bulunamadı")
 
         order = {
-            "order_id": order_id,
+            "order_id":     order_id,
             "order_item_id": str(order_item_id),
-            "sku": sku,
-            "qty": int(qty),
-            "name": custom.get("name", ""),
-            "year": custom.get("year", ""),
-            "message": custom.get("message", ""),
-            "font_option": custom.get("font_option", "SERIF"),
+            "sku":          sku,
+            "qty":          int(qty),
+            "name":         custom.get("name", ""),
+            "year":         custom.get("year", ""),
+            "message":      custom.get("message", ""),
+            "font_option":  custom.get("font_option", "SERIF"),
             "color_option": custom.get("color_option", "BLACK"),
-            "is_manual": False,
+            "gift_box":     bool(custom.get("gift_box", False)),
+            "item_price":   float(custom.get("item_price", 0.0)),
+            "shipping_fee": float(custom.get("shipping_fee", 0.0)),
+            "seller_name":  custom.get("seller_name", ""),
+            "order_date":   custom.get("order_date", ""),
+            "is_manual":    False,
         }
 
         # name2..name10 — sadece dolu olanlar

@@ -8,12 +8,12 @@ load_dotenv()
 
 JSX_SCRIPT_PATH = os.getenv(
     "JSX_SCRIPT_PATH",
-    str(Path.home() / "Desktop/AutoPrint/scripts/JSX/Render_Sheet.jsx"),
+    str(Path.home() / "Desktop/autoprint-enterprise/data/Render_Sheet.jsx"),
 )
 
 ORDERS_JSON_PATH = os.getenv(
     "ORDERS_JSON_PATH",
-    str(Path.home() / "Desktop/AutoPrint/input/parsed_orders/orders.json"),
+    str(Path.home() / "Desktop/autoprint-enterprise/data/orders.json"),
 )
 
 TEMPLATE_BASE = os.getenv(
@@ -37,15 +37,29 @@ def detect_product_type(sku: str) -> str:
     if sku.startswith("ACRY2"):
         return "dog_round"
 
+    # Template klasör kontrolü — ACRY snowglobe olabilir
     template_base = Path(TEMPLATE_BASE)
+    for shape in ("snowglobe", "heart_ceramic", "round_ceramic"):
+        folder = template_base / shape
+        if (folder / f"{sku}.ai").exists():
+            return shape
+        if (folder / f"{sku}_template.ai").exists():
+            return shape
 
-    if (template_base / "snowglobe" / f"{sku}.ai").exists():
-        return "snowglobe"
+    # Template yok — prefix'e göre etiketle
+    if sku.startswith("ACRY"):
+        return "acrylic"
 
-    if (template_base / "heart_ceramic" / f"{sku}.ai").exists():
-        return "heart_ceramic"
+    if sku.startswith(("OR", "PO-", "RM", "RO-")):
+        return "polarx"
 
-    return "round_ceramic"
+    if sku.startswith("EX"):
+        return "initial"
+
+    if sku.startswith("CRMC"):
+        return "round_ceramic"
+
+    return "unknown"
 
 
 def resolve_font(product_type: str, font_option: str) -> str:
@@ -78,16 +92,17 @@ class JSXTrigger:
         if not self.jsx_path.exists():
             return {
                 "success": False,
+                "returncode": None,
                 "output": "",
                 "error": f"JSX script bulunamadı: {self.jsx_path}",
             }
-        success, out, err = self._run_osascript()
-        return {"success": success, "output": out, "error": err}
+        success, returncode, out, err = self._run_osascript()
+        return {"success": success, "returncode": returncode, "output": out, "error": err}
 
     def trigger_single(self, order: dict) -> dict:
         return self.trigger_batch([order])
 
-    def _run_osascript(self) -> tuple[bool, str, str]:
+    def _run_osascript(self) -> tuple[bool, int | None, str, str]:
         script = (
             f'tell application "Adobe Illustrator" to '
             f'do javascript file "{self.jsx_path}"'
@@ -101,10 +116,11 @@ class JSXTrigger:
             )
             return (
                 result.returncode == 0,
+                result.returncode,
                 result.stdout.strip(),
                 result.stderr.strip(),
             )
         except subprocess.TimeoutExpired:
-            return False, "", f"osascript timeout ({OSASCRIPT_TIMEOUT}s) aşıldı"
+            return False, None, "", f"osascript timeout ({OSASCRIPT_TIMEOUT}s) aşıldı"
         except FileNotFoundError:
-            return False, "", "osascript bulunamadı — sadece macOS'ta çalışır"
+            return False, None, "", "osascript bulunamadı — sadece macOS'ta çalışır"
