@@ -26,6 +26,12 @@ SUPABASE_KEY = (
 STORAGE_BUCKET = "listing-images"
 ADMIN_PIN = "1234"
 
+STAFF_ACCOUNTS = {
+    "Staff1": "Staff1.2025",
+    "Staff2": "Staff2.2025",
+    "Staff3": "Staff3.2025",
+}
+
 
 @st.cache_resource
 def _get_supabase() -> Client:
@@ -103,13 +109,42 @@ def _fetch_my_listings(submitted_by: str) -> list[dict]:
         return []
 
 
+# ── Staff login ───────────────────────────────────────────────────────────────
+
+def _render_staff_login() -> None:
+    st.markdown("#### Staff Girişi")
+    username = st.selectbox("Kullanıcı", list(STAFF_ACCOUNTS.keys()), key="staff_login_user")
+    password = st.text_input("Şifre", type="password", key="staff_login_pwd")
+    if st.button("Giriş Yap", type="primary"):
+        if STAFF_ACCOUNTS.get(username) == password:
+            st.session_state["listing_staff_user"] = username
+            st.session_state.pop(f"my_listings_{username}", None)
+            st.rerun()
+        else:
+            st.error("Hatalı şifre.")
+
+
 # ── Staff view ────────────────────────────────────────────────────────────────
 
 def _render_staff() -> None:
+    # ── Giriş kontrolü ────────────────────────────────────────────────────────
+    if not st.session_state.get("listing_staff_user"):
+        _render_staff_login()
+        return
+
+    username = st.session_state["listing_staff_user"]
+
+    col_title, col_logout = st.columns([5, 1])
+    with col_title:
+        st.markdown(f"#### Hoş geldin, **{username}** 👋")
+    with col_logout:
+        if st.button("Çıkış", key="staff_logout"):
+            st.session_state.pop("listing_staff_user", None)
+            st.rerun()
+
     st.markdown("#### Submit a New Listing")
 
     with st.form("listing_form", clear_on_submit=True):
-        submitted_by = st.text_input("Your Name *", placeholder="e.g. Sarah")
         title = st.text_input("Title *", placeholder="Max 200 characters", max_chars=200)
         image_file = st.file_uploader("Product Image", type=["jpg", "jpeg", "png", "webp"])
 
@@ -124,9 +159,6 @@ def _render_staff() -> None:
         submitted = st.form_submit_button("📤 Submit for Review", type="primary", use_container_width=True)
 
     if submitted:
-        if not submitted_by.strip():
-            st.error("Your name is required.")
-            return
         if not title.strip():
             st.error("Title is required.")
             return
@@ -139,7 +171,7 @@ def _render_staff() -> None:
                 return  # upload error already shown
 
         row = {
-            "submitted_by": submitted_by.strip(),
+            "submitted_by": username,
             "title":        title.strip(),
             "bullet_1":     bullets[0].strip(),
             "bullet_2":     bullets[1].strip(),
@@ -155,7 +187,7 @@ def _render_staff() -> None:
         try:
             _sb().table("listings").insert(row).execute()
             st.success("✅ Listing submitted successfully!")
-            st.session_state.pop("my_listings_cache", None)
+            st.session_state.pop(f"my_listings_{username}", None)
         except Exception as e:
             st.error(f"Submission failed: {e}")
             return
@@ -164,16 +196,12 @@ def _render_staff() -> None:
     st.divider()
     st.markdown("#### My Submission History")
 
-    name_filter = st.text_input("Enter your name to see your submissions", key="history_name")
-    if not name_filter.strip():
-        return
-
-    cache_key = f"my_listings_{name_filter.strip()}"
+    cache_key = f"my_listings_{username}"
     if st.button("🔄 Refresh", key="refresh_staff"):
         st.session_state.pop(cache_key, None)
 
     if cache_key not in st.session_state:
-        st.session_state[cache_key] = _fetch_my_listings(name_filter.strip())
+        st.session_state[cache_key] = _fetch_my_listings(username)
 
     listings = st.session_state[cache_key]
     if not listings:
