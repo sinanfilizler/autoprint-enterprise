@@ -209,14 +209,23 @@ def _render_staff() -> None:
         return
 
     for lst in listings:
+        lid = lst["id"]
         with st.container():
-            col_info, col_badge = st.columns([5, 1])
+            col_info, col_badge, col_del = st.columns([5, 1, 1])
             with col_info:
                 st.markdown(f"**{lst.get('title', '—')}**")
                 date_str = str(lst.get("created_at", ""))[:10]
                 st.caption(f"Submitted {date_str}")
             with col_badge:
                 st.markdown(_badge(lst.get("status", "pending")), unsafe_allow_html=True)
+            with col_del:
+                if st.button("🗑️", key=f"del_{lid}", help="Bu kaydı sil"):
+                    try:
+                        _sb().table("listings").delete().eq("id", lid).execute()
+                        st.session_state.pop(cache_key, None)
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Silinemedi: {e}")
 
             if lst.get("admin_note"):
                 st.warning(f"📝 Admin note: {lst['admin_note']}")
