@@ -221,9 +221,12 @@ def _render_staff() -> None:
             with col_del:
                 if st.button("🗑️", key=f"del_{lid}", help="Bu kaydı sil"):
                     try:
-                        _sb().table("listings").delete().eq("id", lid).execute()
-                        st.session_state.pop(cache_key, None)
-                        st.rerun()
+                        res = _sb().table("listings").delete().eq("id", lid).execute()
+                        if res.data is not None:
+                            st.session_state.pop(cache_key, None)
+                            st.rerun()
+                        else:
+                            st.error("Silme başarısız — Supabase izin vermedi.")
                     except Exception as e:
                         st.error(f"Silinemedi: {e}")
 
