@@ -15,6 +15,7 @@ load_dotenv()
 from core.order_manager import OrderManager
 from core.parser import AmazonParser, ParseError
 from core.jsx_trigger import JSXTrigger, detect_product_type, resolve_font
+from listing_approval import render_listing_approval
 
 st.set_page_config(
     page_title="AutoPrint Enterprise",
@@ -360,11 +361,11 @@ if "last_result" in st.session_state:
             st.code(r["stderr"], language=None)
 
 if authenticated:
-    tab_upload, tab_queue, tab_dashboard, tab_admin = st.tabs(
-        ["📤 Yükle", "📋 Kuyruk", "📊 Dashboard", "⚙️ Admin"]
+    tab_upload, tab_queue, tab_dashboard, tab_admin, tab_listing = st.tabs(
+        ["📤 Yükle", "📋 Kuyruk", "📊 Dashboard", "⚙️ Admin", "📝 Listing Onay"]
     )
 else:
-    (tab_upload,) = st.tabs(["📤 Yükle"])
+    tab_upload, tab_listing = st.tabs(["📤 Yükle", "📝 Listing Onay"])
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -493,6 +494,12 @@ with tab_upload:
                 else:
                     st.warning("Bu sipariş zaten kuyrukta veya işlendi.")
 
+
+# ──────────────────────────────────────────────────────────────────────────────
+# TAB: LISTING APPROVAL  (her kullanıcı erişebilir)
+# ──────────────────────────────────────────────────────────────────────────────
+with tab_listing:
+    render_listing_approval()
 
 # ──────────────────────────────────────────────────────────────────────────────
 # TAB 2: QUEUE  (sadece giriş yapılmışsa)
@@ -960,3 +967,4 @@ with tab_admin:
                 st.rerun()
             else:
                 st.error("Bağlantı yok.")
+

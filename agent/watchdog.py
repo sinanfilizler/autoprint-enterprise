@@ -27,7 +27,7 @@ from core.jsx_trigger import JSXTrigger
 
 BATCH_LOG_BASE = os.getenv(
     "BATCH_LOG_BASE",
-    str(Path.home() / "Desktop/AutoPrint/batches"),
+    str(Path.home() / "Desktop/autoprint-enterprise/data/batches"),
 )
 
 logging.basicConfig(
@@ -89,14 +89,11 @@ class AutoPrintWatchdog:
 
         if result["success"]:
             log.info(f"Batch başarılı: {batch_id}")
-            for order in orders:
-                order_item_id = str(order.get("order_item_id", ""))
-                ok = self.sc.mark_processed(order_item_id)
-                if ok:
-                    log.debug(f"  ✓ {order_item_id} Log'a taşındı.")
-                else:
-                    log.warning(f"  ✗ {order_item_id} mark_processed başarısız.")
-            log.info(f"{len(orders)} sipariş işlendi ve kuyruktan çıkarıldı.")
+            item_ids = [str(o.get("order_item_id", "")) for o in orders]
+            batch_result = self.sc.mark_processed_batch(item_ids)
+            log.info(f"{batch_result['moved']} sipariş Log'a taşındı.")
+            if batch_result["not_found"]:
+                log.warning(f"Sheets'te bulunamayan ID'ler: {batch_result['not_found']}")
         else:
             log.error(f"JSX başarısız — siparişler kuyrukta bırakıldı. Hata: {result['error']}")
             if result["output"]:

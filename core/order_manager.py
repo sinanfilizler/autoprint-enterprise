@@ -9,11 +9,11 @@ load_dotenv()
 
 ORDERS_JSON_PATH = os.getenv(
     "ORDERS_JSON_PATH",
-    str(Path.home() / "Desktop/AutoPrint/input/parsed_orders/orders.json"),
+    str(Path.home() / "Desktop/autoprint-enterprise/data/orders.json"),
 )
 PROCESSED_TXT_PATH = os.getenv(
     "PROCESSED_TXT_PATH",
-    str(Path.home() / "Desktop/AutoPrint/processed_orders.txt"),
+    str(Path.home() / "Desktop/autoprint-enterprise/data/processed_orders.txt"),
 )
 
 

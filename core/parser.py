@@ -138,10 +138,17 @@ class AmazonParser:
             )
             order_item_id = item_id_match.group(1).strip() if item_id_match else f"{order_id}-{idx + 1}"
 
-            # Quantity
+            # Quantity — SKU'dan önce gelen <tr>'de aranır
+            tr_start = block.rfind('<tr', 0, sm.start())
+            tr_end   = block.find('</tr>', sm.start())
+            row_html = block[tr_start:tr_end] if tr_start != -1 else sub
             qty_match = re.search(
-                r'<td[^>]*class="[^"]*table-border[^"]*"[^>]*>\s*(\d+)\s*</td>', sub
+                r'<td[^>]*a-text-center[^>]*>\s*(\d+)\s*</td>', row_html
             )
+            if not qty_match:
+                qty_match = re.search(
+                    r'<td[^>]*table-border[^>]*>\s*(\d+)\s*</td>', row_html
+                )
             qty = int(qty_match.group(1)) if qty_match else 1
 
             # Customizations
