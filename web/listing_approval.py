@@ -351,22 +351,36 @@ def _render_admin() -> None:
                         st.error(f"Error: {e}")
 
             with act_cols[1]:
-                with st.expander("🔄 Request Revision"):
-                    note = st.text_area("Revision note *", key=f"note_{lid}", height=80)
-                    if st.button("Send", key=f"send_rev_{lid}", type="secondary", use_container_width=True):
-                        if not note.strip():
-                            st.error("Note is required.")
-                        else:
-                            try:
-                                _sb().table("listings").update({
-                                    "status": "revision",
-                                    "admin_note": note.strip(),
-                                    "reviewed_at": datetime.utcnow().isoformat(),
-                                }).eq("id", lid).execute()
-                                st.session_state.pop("admin_listings_cache", None)
-                                st.rerun()
-                            except Exception as e:
-                                st.error(f"Error: {e}")
+                with st.expander("✏️ Düzenle"):
+                    existing_bullets = "\n".join(
+                        lst.get(f"bullet_{i}", "") for i in range(1, 6)
+                        if lst.get(f"bullet_{i}", "")
+                    )
+                    e_title = st.text_input("Title", value=lst.get("title", ""), key=f"e_title_{lid}", max_chars=200)
+                    e_bullets = st.text_area("Bullet Points", value=existing_bullets, key=f"e_bullets_{lid}", height=120)
+                    e_desc = st.text_area("Description", value=lst.get("description", ""), key=f"e_desc_{lid}", height=100, max_chars=2000)
+                    e_kw = st.text_input("Keywords", value=lst.get("keywords", ""), key=f"e_kw_{lid}", max_chars=500)
+                    e_note = st.text_input("Admin notu (opsiyonel)", value=lst.get("admin_note", ""), key=f"e_note_{lid}")
+                    if st.button("💾 Kaydet", key=f"save_edit_{lid}", type="secondary", use_container_width=True):
+                        bullet_lines = [b.strip() for b in e_bullets.splitlines() if b.strip()][:5]
+                        bullet_lines += [""] * (5 - len(bullet_lines))
+                        try:
+                            _sb().table("listings").update({
+                                "title":       e_title.strip(),
+                                "bullet_1":    bullet_lines[0],
+                                "bullet_2":    bullet_lines[1],
+                                "bullet_3":    bullet_lines[2],
+                                "bullet_4":    bullet_lines[3],
+                                "bullet_5":    bullet_lines[4],
+                                "description": e_desc.strip(),
+                                "keywords":    e_kw.strip(),
+                                "admin_note":  e_note.strip(),
+                                "reviewed_at": datetime.utcnow().isoformat(),
+                            }).eq("id", lid).execute()
+                            st.session_state.pop("admin_listings_cache", None)
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Error: {e}")
 
         st.markdown("---")
 
