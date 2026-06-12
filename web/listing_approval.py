@@ -148,10 +148,8 @@ def _render_staff() -> None:
         title = st.text_input("Title *", placeholder="Max 200 characters", max_chars=200)
         image_file = st.file_uploader("Product Image", type=["jpg", "jpeg", "png", "webp"])
 
-        st.markdown("**Bullet Points**")
-        bullets = []
-        for i in range(1, 6):
-            bullets.append(st.text_input(f"Bullet {i}", key=f"bullet_{i}"))
+        st.markdown("**Bullet Points** (her satır ayrı bir bullet)")
+        bullets_raw = st.text_area("Bullet Points", placeholder="1. satır\n2. satır\n3. satır\n...", height=150, key="bullets_raw", label_visibility="collapsed")
 
         description = st.text_area("Description", placeholder="Max 2000 characters", max_chars=2000, height=150)
         keywords = st.text_input("Keywords", placeholder="Max 500 characters", max_chars=500)
@@ -170,14 +168,17 @@ def _render_staff() -> None:
             if image_file and not image_url:
                 return  # upload error already shown
 
+        bullet_lines = [b.strip() for b in bullets_raw.splitlines() if b.strip()][:5]
+        bullet_lines += [""] * (5 - len(bullet_lines))  # eksikleri boş doldur
+
         row = {
             "submitted_by": username,
             "title":        title.strip(),
-            "bullet_1":     bullets[0].strip(),
-            "bullet_2":     bullets[1].strip(),
-            "bullet_3":     bullets[2].strip(),
-            "bullet_4":     bullets[3].strip(),
-            "bullet_5":     bullets[4].strip(),
+            "bullet_1":     bullet_lines[0],
+            "bullet_2":     bullet_lines[1],
+            "bullet_3":     bullet_lines[2],
+            "bullet_4":     bullet_lines[3],
+            "bullet_5":     bullet_lines[4],
             "description":  description.strip(),
             "keywords":     keywords.strip(),
             "image_url":    image_url or "",
