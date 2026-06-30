@@ -525,7 +525,7 @@ with tab_listing:
 # TAB: REPLACEMENT  (Add: şifresiz — Pending: HQ şifreli)
 # ──────────────────────────────────────────────────────────────────────────────
 with tab_replacement:
-    render_replacement(sc, authenticated, ADMIN_PASSWORD)
+    render_replacement(sc)
 
 # ──────────────────────────────────────────────────────────────────────────────
 # TAB 2: QUEUE  (sadece giriş yapılmışsa)

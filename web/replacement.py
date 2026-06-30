@@ -149,41 +149,12 @@ def _render_add(sc) -> None:
 
 # ── Bölüm 2: Pending Replacements ────────────────────────────────────────────
 
-def _render_pending(sc, hq_auth: bool, admin_password: str) -> None:
+def _render_pending(sc) -> None:
     st.markdown("---")
     st.markdown("#### Pending Replacements")
 
-    if not hq_auth:
-        st.markdown(
-            "<div style='background:#1a1d2e;border:1px solid #2d3147;border-radius:10px;"
-            "padding:1.2rem 1.4rem;margin-bottom:1rem;'>"
-            "<div style='font-size:1rem;font-weight:600;color:#f0f2f6;margin-bottom:0.3rem;'>"
-            "🔐 Headquarter Girişi</div>"
-            "<div style='font-size:0.8rem;color:#8b92a5;'>Bekleyen replacement'ları görmek için şifre gereklidir.</div>"
-            "</div>",
-            unsafe_allow_html=True,
-        )
-        with st.form("hq_login_form"):
-            pwd = st.text_input("Admin Şifresi", type="password", placeholder="Yönetici şifresini girin")
-            submitted = st.form_submit_button("Giriş Yap", type="primary", use_container_width=True)
-            if submitted:
-                if not admin_password:
-                    st.error("Sunucuda ADMIN_PASSWORD yapılandırılmamış.")
-                elif pwd == admin_password:
-                    st.session_state["repl_hq_auth"] = True
-                    st.rerun()
-                else:
-                    st.error("Hatalı şifre.")
-        return
-
-    col_out, col_ref = st.columns([1, 1])
-    with col_out:
-        if st.button("Çıkış", key="repl_hq_logout"):
-            st.session_state["repl_hq_auth"] = False
-            st.rerun()
-    with col_ref:
-        if st.button("🔄 Yenile", key="repl_refresh"):
-            st.rerun()
+    if st.button("🔄 Yenile", key="repl_refresh"):
+        st.rerun()
 
     if not sc:
         st.error("Google Sheets bağlantısı yok.")
@@ -346,7 +317,7 @@ def _action_queue(sc, item: dict) -> None:
 
 # ── Ana render fonksiyonu ─────────────────────────────────────────────────────
 
-def render_replacement(sc, authenticated: bool, admin_password: str) -> None:
+def render_replacement(sc) -> None:
     st.markdown("""
     <div style="display:flex; align-items:center; gap:0.6rem; margin-bottom:1.2rem;">
         <span style="font-size:1.4rem;">🔄</span>
@@ -358,5 +329,4 @@ def render_replacement(sc, authenticated: bool, admin_password: str) -> None:
     """, unsafe_allow_html=True)
 
     _render_add(sc)
-    hq_auth = authenticated or st.session_state.get("repl_hq_auth", False)
-    _render_pending(sc, hq_auth, admin_password)
+    _render_pending(sc)
