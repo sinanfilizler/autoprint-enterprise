@@ -10,6 +10,7 @@ Sheets yapısı:
 Her iki sheet'te duplicate kontrolü order_item_id üzerinden yapılır.
 """
 
+import io
 import os
 import time
 from datetime import datetime
@@ -31,6 +32,7 @@ QUEUE_SHEET = os.getenv("GOOGLE_SHEETS_QUEUE_SHEET", "Queue")
 LOG_SHEET = os.getenv("GOOGLE_SHEETS_LOG_SHEET", "Log")
 COSTS_SHEET = os.getenv("GOOGLE_SHEETS_COSTS_SHEET", "Costs")
 REPLACEMENTS_SHEET = "Replacements"
+DRIVE_FOLDER_NAME = "AutoPrint Replacements"
 
 # ── Sütun düzeni ────────────────────────────────────────────────────────────
 QUEUE_COLUMNS = [
@@ -46,8 +48,28 @@ LOG_COLUMNS = QUEUE_COLUMNS + ["processed_at"]
 COSTS_COLUMNS = ["sku", "cost"]
 REPLACEMENTS_COLUMNS = [
     "replacement_id", "sku", "personalization", "replacement_type",
-    "status", "created_at", "label_pdf",
+    "status", "created_at", "label_drive_url",
 ]
+
+
+def _build_drive_service():
+    """Drive API v3 client döner — credentials.json veya st.secrets kullanır."""
+    from google.oauth2.service_account import Credentials
+    from googleapiclient.discovery import build
+
+    scopes = ["https://www.googleapis.com/auth/drive"]
+    creds_path = Path(CREDENTIALS_PATH)
+    if creds_path.exists():
+        creds = Credentials.from_service_account_file(str(creds_path), scopes=scopes)
+    else:
+        try:
+            import streamlit as st
+            creds = Credentials.from_service_account_info(
+                dict(st.secrets["gcp_service_account"]), scopes=scopes
+            )
+        except Exception as e:
+            raise RuntimeError(f"Drive credentials bulunamadı: {e}")
+    return build("drive", "v3", credentials=creds, cache_discovery=False)
 
 
 def _build_gspread_client() -> gspread.Client:
@@ -491,6 +513,54 @@ class SheetsClient:
 
     # ── Replacements API ─────────────────────────────────────────────────────
 
+    def upload_label_to_drive(self, pdf_bytes: bytes, filename: str) -> str:
+        """
+        PDF'i Drive'daki 'AutoPrint Replacements' klasörüne yükler.
+        anyone/reader izni ekler ve view URL döner.
+        """
+        from googleapiclient.http import MediaIoBaseUpload
+
+        service = _build_drive_service()
+
+        # Klasörü bul veya oluştur (instance'ta önbellekle)
+        if not getattr(self, "_drive_folder_id", None):
+            self._drive_folder_id = self._ensure_drive_folder(service)
+
+        media = MediaIoBaseUpload(io.BytesIO(pdf_bytes), mimetype="application/pdf")
+        file = service.files().create(
+            body={"name": filename, "parents": [self._drive_folder_id]},
+            media_body=media,
+            fields="id",
+        ).execute()
+
+        file_id = file["id"]
+        service.permissions().create(
+            fileId=file_id,
+            body={"type": "anyone", "role": "reader"},
+        ).execute()
+
+        return f"https://drive.google.com/file/d/{file_id}/view"
+
+    def _ensure_drive_folder(self, service) -> str:
+        """'AutoPrint Replacements' Drive klasörünü döner, yoksa oluşturur."""
+        q = (
+            f"name='{DRIVE_FOLDER_NAME}' "
+            "and mimeType='application/vnd.google-apps.folder' "
+            "and trashed=false"
+        )
+        res = service.files().list(q=q, fields="files(id)", pageSize=1).execute()
+        files = res.get("files", [])
+        if files:
+            return files[0]["id"]
+        folder = service.files().create(
+            body={
+                "name": DRIVE_FOLDER_NAME,
+                "mimeType": "application/vnd.google-apps.folder",
+            },
+            fields="id",
+        ).execute()
+        return folder["id"]
+
     def add_replacement(self, data: dict) -> None:
         """Replacements sheet'ine yeni satır ekler."""
         row = [str(data.get(col, "")) for col in REPLACEMENTS_COLUMNS]
@@ -505,7 +575,7 @@ class SheetsClient:
         """replacement_id'ye göre status sütununu günceller. Başarılıysa True döner."""
         rid = str(replacement_id).strip()
         try:
-            rid_col = REPLACEMENTS_COLUMNS.index("replacement_id") + 1  # 1-indexed
+            rid_col = REPLACEMENTS_COLUMNS.index("replacement_id") + 1
             cell = self._replacements.find(rid, in_column=rid_col)
         except Exception:
             return False

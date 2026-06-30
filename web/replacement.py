@@ -2,39 +2,36 @@
 web/replacement.py
 ==================
 Replacement sekmesi UI.
-  Add Replacement    : şifresiz (Türkiye kullanır)
-  Pending Replacements: ADMIN_PASSWORD gerekli (Headquarter)
+  Add Replacement      : şifresiz (Türkiye kullanır)
+  Pending Replacements : ADMIN_PASSWORD gerekli (Headquarter)
+
+Label PDF'ler Google Drive'da "AutoPrint Replacements" klasörüne kaydedilir.
 """
 
-import base64
-import gzip
 import io
 import json
+import re
 import uuid
 from datetime import datetime
 
+import requests
 import streamlit as st
 
 
 # ── PDF → PNG dönüşümü ───────────────────────────────────────────────────────
 
 def _pdf_to_png(pdf_bytes: bytes, dpi: int = 150) -> bytes | None:
-    """PDF'in ilk sayfasını PNG bytes'a çevirir. Hata durumunda None döner."""
-    # pypdfium2 (poppler bağımlılığı yok)
     try:
         import pypdfium2 as pdfium
         doc = pdfium.PdfDocument(pdf_bytes)
         if len(doc) == 0:
             return None
-        page = doc[0]
-        bitmap = page.render(scale=dpi / 72)
-        pil_img = bitmap.to_pil()
+        bitmap = doc[0].render(scale=dpi / 72)
         buf = io.BytesIO()
-        pil_img.save(buf, format="PNG")
+        bitmap.to_pil().save(buf, format="PNG")
         return buf.getvalue()
     except Exception:
         pass
-    # pdf2image (poppler gerekli — fallback)
     try:
         from pdf2image import convert_from_bytes
         pages = convert_from_bytes(pdf_bytes, dpi=dpi, first_page=1, last_page=1)
@@ -50,7 +47,6 @@ def _pdf_to_png(pdf_bytes: bytes, dpi: int = 150) -> bytes | None:
 # ── Personalization yardımcıları ─────────────────────────────────────────────
 
 def _parse_persona(text: str) -> dict[str, str]:
-    """# formatındaki metni {KEY: value} dict'e çevirir."""
     result: dict[str, str] = {}
     for line in (text or "").strip().splitlines():
         line = line.strip()
@@ -62,27 +58,35 @@ def _parse_persona(text: str) -> dict[str, str]:
 
 
 def _persona_to_text(persona_json: str) -> str:
-    """JSON dict'i # formatına çevirir."""
     try:
-        d = json.loads(persona_json)
-        return "\n".join(f"#{k}: {v}" for k, v in d.items())
+        return "\n".join(f"#{k}: {v}" for k, v in json.loads(persona_json).items())
     except Exception:
         return ""
 
 
-# ── Label PDF sıkıştırma / açma (Sheets hücre limiti için) ──────────────────
+# ── Drive URL'den PDF indir ───────────────────────────────────────────────────
 
-def _encode_pdf(pdf_bytes: bytes) -> str:
-    """PDF'i gzip sıkıştır + base64 encode et."""
-    return base64.b64encode(gzip.compress(pdf_bytes)).decode("utf-8")
+@st.cache_data(show_spinner=False, ttl=3600)
+def _fetch_pdf_from_drive(drive_url: str) -> bytes | None:
+    """Drive view URL'den PDF bytes indir (public file)."""
+    match = re.search(r"/file/d/([^/]+)/", drive_url)
+    if not match:
+        return None
+    file_id = match.group(1)
+    try:
+        resp = requests.get(
+            f"https://drive.google.com/uc?export=download&id={file_id}",
+            timeout=30,
+            allow_redirects=True,
+        )
+        if resp.status_code == 200 and resp.content[:4] == b"%PDF":
+            return resp.content
+    except Exception:
+        pass
+    return None
 
 
-def _decode_pdf(encoded: str) -> bytes:
-    """_encode_pdf ile kodlanmış stringi geri çöz."""
-    return gzip.decompress(base64.b64decode(encoded))
-
-
-# ── Önbellek: A4 PDF oluşturma ───────────────────────────────────────────────
+# ── A4 PDF (cached) ───────────────────────────────────────────────────────────
 
 @st.cache_data(show_spinner=False)
 def _cached_a4_pdf(
@@ -90,22 +94,16 @@ def _cached_a4_pdf(
     replacement_type: str,
     persona_json: str,
     created_at: str,
-    encoded_pdf: str,
+    drive_url: str,
 ) -> bytes:
-    """A4 landscape PDF oluştur (cached)."""
     from core.label_merger import build_a4_pdf
 
-    try:
-        pdf_bytes = _decode_pdf(encoded_pdf)
-        png_bytes = _pdf_to_png(pdf_bytes, dpi=120)
-    except Exception:
-        png_bytes = None
-
-    persona_text = _persona_to_text(persona_json)
-    return build_a4_pdf(sku, replacement_type, persona_text, created_at, png_bytes)
+    pdf_bytes = _fetch_pdf_from_drive(drive_url) if drive_url else None
+    png_bytes = _pdf_to_png(pdf_bytes, dpi=120) if pdf_bytes else None
+    return build_a4_pdf(sku, replacement_type, _persona_to_text(persona_json), created_at, png_bytes)
 
 
-# ── Bölüm 1: Add Replacement ────────────────────────────────────────────────
+# ── Bölüm 1: Add Replacement ─────────────────────────────────────────────────
 
 def _render_add(sc) -> None:
     st.markdown("#### Replacement Talebi Oluştur")
@@ -138,64 +136,59 @@ def _render_add(sc) -> None:
             errors.append("SKU zorunludur.")
         if not label_file:
             errors.append("Label PDF zorunludur.")
+        if not sc:
+            errors.append("Google Sheets bağlantısı yok.")
+        for e in errors:
+            st.error(e)
         if errors:
-            for e in errors:
-                st.error(e)
             return
 
         pdf_bytes = label_file.read()
         png_bytes = _pdf_to_png(pdf_bytes)
 
-        # Preview
+        # Önizleme
         st.markdown("---")
         st.markdown("**Önizleme**")
-        prev_left, prev_right = st.columns(2)
-        with prev_left:
-            persona = _parse_persona(persona_text)
+        prev_l, prev_r = st.columns(2)
+        with prev_l:
             st.markdown(f"**SKU:** {sku.strip()}")
             st.markdown(f"**Tip:** {repl_type}")
-            if persona:
-                for k, v in persona.items():
-                    st.markdown(f"**{k}:** {v}")
-            else:
-                st.caption("Personalization girilmedi.")
-        with prev_right:
+            persona = _parse_persona(persona_text)
+            for k, v in persona.items():
+                st.markdown(f"**{k}:** {v}")
+        with prev_r:
             if png_bytes:
                 st.image(png_bytes, caption="Label", use_container_width=True)
             else:
-                st.info("Label önizleme mevcut değil.")
+                st.info("Label önizleme yok.")
 
-        # Sheets'e kaydet
-        if not sc:
-            st.error("Google Sheets bağlantısı yok — kaydedilemedi.")
-            return
+        # Drive'a yükle
+        with st.spinner("Label Drive'a yükleniyor..."):
+            try:
+                filename = f"{sku.strip()}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+                drive_url = sc.upload_label_to_drive(pdf_bytes, filename)
+            except Exception as exc:
+                st.error(f"Drive yüklemesi başarısız: {exc}")
+                return
 
-        encoded = _encode_pdf(pdf_bytes)
-        char_count = len(encoded)
-        if char_count > 49_000:
-            st.warning(
-                f"PDF sıkıştırıldıktan sonra {char_count:,} karakter. "
-                "Google Sheets hücre limiti (~50K) aşılıyor — kayıt başarısız olabilir."
-            )
-
+        # Sheets'e yaz
         data = {
-            "replacement_id": str(uuid.uuid4()),
-            "sku": sku.strip(),
+            "replacement_id":  str(uuid.uuid4()),
+            "sku":             sku.strip(),
             "personalization": json.dumps(_parse_persona(persona_text), ensure_ascii=False),
             "replacement_type": repl_type,
-            "status": "pending",
-            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "label_pdf": encoded,
+            "status":          "pending",
+            "created_at":      datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "label_drive_url": drive_url,
         }
-
         try:
             sc.add_replacement(data)
-            st.success("Gönderildi. Headquarter onayı bekleniyor.")
+            st.success(f"Gönderildi. Headquarter onayı bekleniyor.  \n🔗 [Label Drive'da]({drive_url})")
         except Exception as exc:
             st.error(f"Sheets'e yazılamadı: {exc}")
 
 
-# ── Bölüm 2: Pending Replacements (HQ şifreli) ──────────────────────────────
+# ── Bölüm 2: Pending Replacements ────────────────────────────────────────────
 
 def _render_pending(sc, hq_auth: bool, admin_password: str) -> None:
     st.markdown("---")
@@ -215,12 +208,12 @@ def _render_pending(sc, hq_auth: bool, admin_password: str) -> None:
                 st.error("Hatalı şifre.")
         return
 
-    col_title, col_logout, col_refresh = st.columns([4, 1, 1])
-    with col_logout:
+    col_title, col_out, col_ref = st.columns([4, 1, 1])
+    with col_out:
         if st.button("Çıkış", key="repl_hq_logout"):
             st.session_state["repl_hq_auth"] = False
             st.rerun()
-    with col_refresh:
+    with col_ref:
         if st.button("🔄", key="repl_refresh"):
             st.rerun()
 
@@ -239,15 +232,14 @@ def _render_pending(sc, hq_auth: bool, admin_password: str) -> None:
         return
 
     for item in pending:
-        rid = item.get("replacement_id", "?")
-        sku = item.get("sku", "?")
-        rtype = item.get("replacement_type", "?")
-        created = item.get("created_at", "?")
-        persona_json = item.get("personalization", "{}")
-        encoded_pdf = item.get("label_pdf", "")
+        rid        = item.get("replacement_id", "?")
+        sku        = item.get("sku", "?")
+        rtype      = item.get("replacement_type", "?")
+        created    = item.get("created_at", "?")
+        p_json     = item.get("personalization", "{}")
+        drive_url  = item.get("label_drive_url", "")
 
-        label = f"**{sku}** — {rtype} — {created}"
-        with st.expander(label, expanded=False):
+        with st.expander(f"**{sku}** — {rtype} — {created}", expanded=False):
             col_info, col_label = st.columns([1, 1])
 
             with col_info:
@@ -255,40 +247,39 @@ def _render_pending(sc, hq_auth: bool, admin_password: str) -> None:
                 st.markdown(f"**SKU:** {sku}")
                 st.markdown(f"**Tip:** {rtype}")
                 st.markdown(f"**Tarih:** {created}")
+                if drive_url:
+                    st.markdown(f"🔗 [Label PDF (Drive)]({drive_url})")
                 st.markdown("**Personalization:**")
                 try:
-                    persona = json.loads(persona_json)
-                    for k, v in persona.items():
+                    for k, v in json.loads(p_json).items():
                         st.markdown(f"- **{k}:** {v}")
                 except Exception:
-                    st.code(persona_json)
+                    st.code(p_json)
 
             with col_label:
-                if encoded_pdf:
-                    try:
-                        png = _pdf_to_png(_decode_pdf(encoded_pdf), dpi=80)
+                if drive_url:
+                    pdf_bytes = _fetch_pdf_from_drive(drive_url)
+                    if pdf_bytes:
+                        png = _pdf_to_png(pdf_bytes, dpi=80)
                         if png:
                             st.image(png, caption="Label", use_container_width=True)
                         else:
-                            st.caption("Önizleme yok")
-                    except Exception:
-                        st.caption("Label yüklenemedi")
+                            st.caption("Önizleme oluşturulamadı")
+                    else:
+                        st.caption("Drive'dan indirilemedi")
 
             btn1, btn2 = st.columns(2)
-
             with btn1:
                 if st.button("✅ Kuyruğa Ekle", key=f"repl_queue_{rid}"):
                     _action_queue(sc, item)
-
             with btn2:
-                if encoded_pdf:
+                if drive_url:
                     try:
-                        a4_bytes = _cached_a4_pdf(sku, rtype, persona_json, created, encoded_pdf)
-                        fname = f"replacement_{sku}_{created[:10]}.pdf"
+                        a4 = _cached_a4_pdf(sku, rtype, p_json, created, drive_url)
                         st.download_button(
                             "⬇️ Label İndir",
-                            data=a4_bytes,
-                            file_name=fname,
+                            data=a4,
+                            file_name=f"replacement_{sku}_{created[:10]}.pdf",
                             mime="application/pdf",
                             key=f"repl_dl_{rid}",
                         )
@@ -299,20 +290,16 @@ def _render_pending(sc, hq_auth: bool, admin_password: str) -> None:
 
 
 def _action_queue(sc, item: dict) -> None:
-    """Replacement'ı orders.json'a yazar, Illustrator'ı tetikler, status='queued' yapar."""
     from core.jsx_trigger import JSXTrigger, detect_product_type
     from core.order_manager import OrderManager
 
     sku = item.get("sku", "")
     rid = item.get("replacement_id", "")
-    persona_json = item.get("personalization", "{}")
-
     try:
-        persona = json.loads(persona_json)
+        persona = json.loads(item.get("personalization", "{}"))
     except Exception:
         persona = {}
 
-    # Orders dict oluştur
     order: dict = {
         "order_id":      f"REPL-{rid[:8]}",
         "order_item_id": f"REPL-{rid}",
@@ -325,28 +312,22 @@ def _action_queue(sc, item: dict) -> None:
         "color_option":  "BLACK",
         "is_manual":     True,
     }
-    # Ek isim alanları
-    name_keys = [("NAME_DAD", 2), ("NAME_2", 3), ("NAME_3", 4), ("NAME_4", 5)]
-    for pkey, n in name_keys:
+    for pkey, n in [("NAME_DAD", 2), ("NAME_2", 3), ("NAME_3", 4)]:
         if pkey in persona:
             order[f"name{n}"] = persona[pkey]
 
-    # orders.json'a yaz
     try:
-        mgr = OrderManager()
-        mgr.add_orders([order])
+        OrderManager().add_orders([order])
     except Exception as exc:
         st.error(f"orders.json yazılamadı: {exc}")
         return
 
-    # Illustrator tetikle (SKU tanımlıysa)
     pt = detect_product_type(sku)
     if pt == "unknown":
         st.warning(f"SKU '{sku}' tanımlı değil — Illustrator tetiklenmedi.")
     else:
         try:
-            jsx = JSXTrigger()
-            result = jsx.trigger_batch([order])
+            result = JSXTrigger().trigger_batch([order])
             if result["success"]:
                 st.success("Illustrator'a gönderildi.")
             else:
@@ -354,10 +335,9 @@ def _action_queue(sc, item: dict) -> None:
         except Exception as exc:
             st.warning(f"JSX tetiklenemedi: {exc}")
 
-    # Status güncelle
     try:
         sc.update_replacement_status(rid, "queued")
-        st.success("Status 'queued' olarak güncellendi.")
+        st.success("Status 'queued' güncellendi.")
         st.rerun()
     except Exception as exc:
         st.error(f"Status güncellenemedi: {exc}")
@@ -377,7 +357,5 @@ def render_replacement(sc, authenticated: bool, admin_password: str) -> None:
     """, unsafe_allow_html=True)
 
     _render_add(sc)
-
-    # Ana admin zaten girişyapmışsa HQ bölümü direkt açılır
     hq_auth = authenticated or st.session_state.get("repl_hq_auth", False)
     _render_pending(sc, hq_auth, admin_password)
