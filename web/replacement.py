@@ -48,11 +48,11 @@ def _pdf_to_png(pdf_bytes: bytes, dpi: int = 150) -> bytes | None:
 def _parse_persona(text: str) -> dict[str, str]:
     result: dict[str, str] = {}
     for line in (text or "").strip().splitlines():
-        line = line.strip()
-        if line.startswith("#"):
-            parts = line[1:].split(":", 1)
-            if len(parts) == 2:
-                result[parts[0].strip()] = parts[1].strip()
+        line = line.strip().lstrip("#")
+        if ":" in line:
+            key, _, val = line.partition(":")
+            if key.strip():
+                result[key.strip()] = val.strip()
     return result
 
 
@@ -83,11 +83,11 @@ def _render_add(sc) -> None:
     persona_text = st.text_area(
         "Personalization",
         placeholder=(
-            "#NAME: Alex\n"
-            "#NAME_DAD: Michael\n"
-            "#YEAR: 2026\n"
-            "#MESSAGE: Merry Christmas\n"
-            "#NOTE: gift box gönderilmemiş"
+            "NAME: Alex\n"
+            "NAME_DAD: Michael\n"
+            "YEAR: 2026\n"
+            "MESSAGE: Merry Christmas\n"
+            "NOTE: gift box gönderilmemiş"
         ),
         height=160,
         key="repl_persona",
