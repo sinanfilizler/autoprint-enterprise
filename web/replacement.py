@@ -94,7 +94,7 @@ def _render_add(sc) -> None:
     )
     repl_type = st.selectbox(
         "Replacement Tipi",
-        ["Tam Replacement", "Düzeltme", "Eksik Ürün", "Gift Box"],
+        ["Broken", "Defective", "Misspelling", "Missing Product", "Missing Shipment", "Other"],
         key="repl_type",
     )
 
