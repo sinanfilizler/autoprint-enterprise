@@ -499,30 +499,28 @@ class SheetsClient:
 
     # ── Replacements API ─────────────────────────────────────────────────────
 
-    def add_replacement(self, data: dict, pdf_bytes: bytes | None = None) -> None:
+    def add_replacement(self, data: dict, pdf_bytes: bytes) -> None:
         """
-        Replacements sheet'ine metadata yazar.
-        pdf_bytes verilmişse base64'e çevirip 45K'lık chunk'lara böler ve
-        ReplacementLabels sheet'ine yazar; label_chunk_count'u günceller.
+        pdf_bytes'ı base64'e çevirip 45K'lık chunk'lara böler ve
+        ReplacementLabels sheet'ine yazar.
+        Ardından Replacements sheet'ine metadata + label_chunk_count yazar.
+
+        data dict'inde olması gerekenler:
+          replacement_id, sku, personalization, replacement_type,
+          status, created_at
         """
         import base64
 
-        chunk_count = 0
         rid = str(data.get("replacement_id", ""))
 
-        if pdf_bytes:
-            b64 = base64.b64encode(pdf_bytes).decode("utf-8")
-            chunks = [b64[i : i + _CHUNK_SIZE] for i in range(0, len(b64), _CHUNK_SIZE)]
-            chunk_count = len(chunks)
-            chunk_rows = [
-                [rid, str(idx), chunk]
-                for idx, chunk in enumerate(chunks)
-            ]
-            self._replacement_labels.append_rows(chunk_rows, value_input_option="RAW")
+        b64 = base64.b64encode(pdf_bytes).decode("utf-8")
+        chunks = [b64[i : i + _CHUNK_SIZE] for i in range(0, len(b64), _CHUNK_SIZE)]
+        chunk_rows = [[rid, str(idx), chunk] for idx, chunk in enumerate(chunks)]
+        self._replacement_labels.append_rows(chunk_rows, value_input_option="RAW")
 
-        data = dict(data)
-        data["label_chunk_count"] = str(chunk_count)
-        row = [str(data.get(col, "")) for col in REPLACEMENTS_COLUMNS]
+        row_data = dict(data)
+        row_data["label_chunk_count"] = str(len(chunks))
+        row = [str(row_data.get(col, "")) for col in REPLACEMENTS_COLUMNS]
         self._replacements.append_row(row, value_input_option="RAW")
 
     def get_replacement_label(self, replacement_id: str) -> bytes | None:
