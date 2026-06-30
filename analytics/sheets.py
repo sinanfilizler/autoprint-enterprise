@@ -32,7 +32,7 @@ QUEUE_SHEET = os.getenv("GOOGLE_SHEETS_QUEUE_SHEET", "Queue")
 LOG_SHEET = os.getenv("GOOGLE_SHEETS_LOG_SHEET", "Log")
 COSTS_SHEET = os.getenv("GOOGLE_SHEETS_COSTS_SHEET", "Costs")
 REPLACEMENTS_SHEET = "Replacements"
-DRIVE_FOLDER_NAME = "AutoPrint Replacements"
+REPLACEMENT_LABELS_SHEET = "ReplacementLabels"
 
 # ── Sütun düzeni ────────────────────────────────────────────────────────────
 QUEUE_COLUMNS = [
@@ -48,28 +48,11 @@ LOG_COLUMNS = QUEUE_COLUMNS + ["processed_at"]
 COSTS_COLUMNS = ["sku", "cost"]
 REPLACEMENTS_COLUMNS = [
     "replacement_id", "sku", "personalization", "replacement_type",
-    "status", "created_at", "label_drive_url",
+    "status", "created_at", "label_chunk_count",
 ]
+REPLACEMENT_LABELS_COLUMNS = ["replacement_id", "chunk_index", "chunk_data"]
 
-
-def _build_drive_service():
-    """Drive API v3 client döner — credentials.json veya st.secrets kullanır."""
-    from google.oauth2.service_account import Credentials
-    from googleapiclient.discovery import build
-
-    scopes = ["https://www.googleapis.com/auth/drive"]
-    creds_path = Path(CREDENTIALS_PATH)
-    if creds_path.exists():
-        creds = Credentials.from_service_account_file(str(creds_path), scopes=scopes)
-    else:
-        try:
-            import streamlit as st
-            creds = Credentials.from_service_account_info(
-                dict(st.secrets["gcp_service_account"]), scopes=scopes
-            )
-        except Exception as e:
-            raise RuntimeError(f"Drive credentials bulunamadı: {e}")
-    return build("drive", "v3", credentials=creds, cache_discovery=False)
+_CHUNK_SIZE = 45_000  # karakter — Sheets 50K hücre limitinin altında güvenli
 
 
 def _build_gspread_client() -> gspread.Client:
@@ -122,6 +105,9 @@ class SheetsClient:
         self._log = self._get_or_create_sheet(LOG_SHEET, LOG_COLUMNS)
         self._costs = self._get_or_create_sheet(COSTS_SHEET, COSTS_COLUMNS)
         self._replacements = self._get_or_create_sheet(REPLACEMENTS_SHEET, REPLACEMENTS_COLUMNS)
+        self._replacement_labels = self._get_or_create_sheet(
+            REPLACEMENT_LABELS_SHEET, REPLACEMENT_LABELS_COLUMNS
+        )
 
         self._cache: dict = {}  # key → (timestamp, value)
 
@@ -513,61 +499,123 @@ class SheetsClient:
 
     # ── Replacements API ─────────────────────────────────────────────────────
 
-    def upload_label_to_drive(self, pdf_bytes: bytes, filename: str) -> str:
+    def add_replacement(self, data: dict, pdf_bytes: bytes | None = None) -> None:
         """
-        PDF'i Drive'daki 'AutoPrint Replacements' klasörüne yükler.
-        anyone/reader izni ekler ve view URL döner.
+        Replacements sheet'ine metadata yazar.
+        pdf_bytes verilmişse base64'e çevirip 45K'lık chunk'lara böler ve
+        ReplacementLabels sheet'ine yazar; label_chunk_count'u günceller.
         """
-        from googleapiclient.http import MediaIoBaseUpload
+        import base64
 
-        service = _build_drive_service()
+        chunk_count = 0
+        rid = str(data.get("replacement_id", ""))
 
-        # Klasörü bul veya oluştur (instance'ta önbellekle)
-        if not getattr(self, "_drive_folder_id", None):
-            self._drive_folder_id = self._ensure_drive_folder(service)
+        if pdf_bytes:
+            b64 = base64.b64encode(pdf_bytes).decode("utf-8")
+            chunks = [b64[i : i + _CHUNK_SIZE] for i in range(0, len(b64), _CHUNK_SIZE)]
+            chunk_count = len(chunks)
+            chunk_rows = [
+                [rid, str(idx), chunk]
+                for idx, chunk in enumerate(chunks)
+            ]
+            self._replacement_labels.append_rows(chunk_rows, value_input_option="RAW")
 
-        media = MediaIoBaseUpload(io.BytesIO(pdf_bytes), mimetype="application/pdf")
-        file = service.files().create(
-            body={"name": filename, "parents": [self._drive_folder_id]},
-            media_body=media,
-            fields="id",
-        ).execute()
-
-        file_id = file["id"]
-        service.permissions().create(
-            fileId=file_id,
-            body={"type": "anyone", "role": "reader"},
-        ).execute()
-
-        return f"https://drive.google.com/file/d/{file_id}/view"
-
-    def _ensure_drive_folder(self, service) -> str:
-        """'AutoPrint Replacements' Drive klasörünü döner, yoksa oluşturur."""
-        q = (
-            f"name='{DRIVE_FOLDER_NAME}' "
-            "and mimeType='application/vnd.google-apps.folder' "
-            "and trashed=false"
-        )
-        res = service.files().list(q=q, fields="files(id)", pageSize=1).execute()
-        files = res.get("files", [])
-        if files:
-            return files[0]["id"]
-        folder = service.files().create(
-            body={
-                "name": DRIVE_FOLDER_NAME,
-                "mimeType": "application/vnd.google-apps.folder",
-            },
-            fields="id",
-        ).execute()
-        return folder["id"]
-
-    def add_replacement(self, data: dict) -> None:
-        """Replacements sheet'ine yeni satır ekler."""
+        data = dict(data)
+        data["label_chunk_count"] = str(chunk_count)
         row = [str(data.get(col, "")) for col in REPLACEMENTS_COLUMNS]
         self._replacements.append_row(row, value_input_option="RAW")
 
+    def get_replacement_label(self, replacement_id: str) -> bytes | None:
+        """
+        ReplacementLabels sheet'inden chunk'ları toplar, sıraya dizer,
+        birleştirir ve base64'ten PDF bytes'a çevirir.
+        """
+        import base64
+
+        rid = str(replacement_id).strip()
+        all_rows = self._replacement_labels.get_all_values()
+        if len(all_rows) <= 1:
+            return None
+
+        header = all_rows[0]
+        try:
+            rid_col   = header.index("replacement_id")
+            idx_col   = header.index("chunk_index")
+            data_col  = header.index("chunk_data")
+        except ValueError:
+            rid_col, idx_col, data_col = 0, 1, 2
+
+        matched: list[tuple[int, str]] = []
+        for row in all_rows[1:]:
+            cell_rid = row[rid_col].strip() if rid_col < len(row) else ""
+            if cell_rid != rid:
+                continue
+            try:
+                idx = int(row[idx_col]) if idx_col < len(row) else 0
+            except (ValueError, TypeError):
+                idx = 0
+            chunk = row[data_col] if data_col < len(row) else ""
+            matched.append((idx, chunk))
+
+        if not matched:
+            return None
+
+        matched.sort(key=lambda t: t[0])
+        b64 = "".join(c for _, c in matched)
+        try:
+            return base64.b64decode(b64)
+        except Exception:
+            return None
+
+    def delete_replacement_label_chunks(self, replacement_id: str) -> None:
+        """
+        ReplacementLabels'tan o replacement_id'ye ait tüm chunk satırlarını siler.
+        Replacements sheet'inde label_chunk_count'u 0 yapar.
+        """
+        rid = str(replacement_id).strip()
+
+        # 1. Silinecek satır numaralarını bul
+        all_rows = self._replacement_labels.get_all_values()
+        if len(all_rows) > 1:
+            header = all_rows[0]
+            rid_col = header.index("replacement_id") if "replacement_id" in header else 0
+            rows_to_delete = [
+                i + 2  # 1-indexed, başlık=1
+                for i, row in enumerate(all_rows[1:])
+                if (row[rid_col].strip() if rid_col < len(row) else "") == rid
+            ]
+            if rows_to_delete:
+                requests = [
+                    {
+                        "deleteDimension": {
+                            "range": {
+                                "sheetId":    self._replacement_labels.id,
+                                "dimension":  "ROWS",
+                                "startIndex": row_num - 1,  # 0-indexed
+                                "endIndex":   row_num,
+                            }
+                        }
+                    }
+                    for row_num in sorted(rows_to_delete, reverse=True)
+                ]
+                self._spreadsheet.batch_update({"requests": requests})
+
+        # 2. Replacements'ta label_chunk_count = 0
+        repl_rows = self._replacements.get_all_values()
+        if len(repl_rows) > 1:
+            h = repl_rows[0]
+            try:
+                rid_col_r   = h.index("replacement_id")
+                count_col_r = h.index("label_chunk_count")
+            except ValueError:
+                return
+            for i, row in enumerate(repl_rows[1:], start=2):
+                if (row[rid_col_r].strip() if rid_col_r < len(row) else "") == rid:
+                    self._replacements.update_cell(i, count_col_r + 1, "0")
+                    break
+
     def get_pending_replacements(self) -> list[dict]:
-        """status='pending' olan replacement'ları döner."""
+        """status='pending' olan replacement'ları döner (label verisi olmadan)."""
         records = self._replacements.get_all_records(default_blank="")
         return [r for r in records if str(r.get("status", "")).strip() == "pending"]
 
