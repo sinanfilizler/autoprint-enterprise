@@ -255,17 +255,19 @@ def _render_pending(sc, hq_auth: bool, admin_password: str) -> None:
                             a4  = _build_a4(sku, rtype, p_json, created, raw)
                             st.session_state[pdf_key] = a4
                         sc.delete_replacement_label_chunks(rid)
-                        sc.update_replacement_status(rid, "downloaded")
                         st.rerun()
                 else:
                     fname = f"replacement_{sku}_{created[:10]}.pdf"
-                    st.download_button(
+                    if st.download_button(
                         "⬇️ PDF İndir",
                         data=st.session_state[pdf_key],
                         file_name=fname,
                         mime="application/pdf",
                         key=f"repl_dl_{rid}",
-                    )
+                    ):
+                        sc.update_replacement_status(rid, "downloaded")
+                        del st.session_state[pdf_key]
+                        st.rerun()
 
             # ── Preview göster ─────────────────────────────────────────────
             if view_key in st.session_state and st.session_state[view_key]:

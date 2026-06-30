@@ -613,9 +613,9 @@ class SheetsClient:
                     break
 
     def get_pending_replacements(self) -> list[dict]:
-        """status='pending' olan replacement'ları döner (label verisi olmadan)."""
+        """status='pending' veya 'ready' olan replacement'ları döner."""
         records = self._replacements.get_all_records(default_blank="")
-        return [r for r in records if str(r.get("status", "")).strip() == "pending"]
+        return [r for r in records if str(r.get("status", "")).strip() in ("pending", "ready")]
 
     def update_replacement_status(self, replacement_id: str, status: str) -> bool:
         """replacement_id'ye göre status sütununu günceller. Başarılıysa True döner."""
