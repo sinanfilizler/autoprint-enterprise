@@ -218,13 +218,17 @@ def _check_auth() -> bool:
 
 def _render_login_sidebar() -> None:
     st.sidebar.markdown("### 🔐 Giriş")
-    pwd = st.sidebar.text_input("Şifre", type="password", key="pwd_input_sidebar", label_visibility="collapsed", placeholder="Şifrenizi girin")
-    if st.sidebar.button("Giriş Yap", use_container_width=True, key="login_btn_sidebar"):
-        if ADMIN_PASSWORD and pwd == ADMIN_PASSWORD:
-            st.session_state["authenticated"] = True
-            st.rerun()
-        else:
-            st.sidebar.error("Hatalı şifre.")
+    with st.sidebar.form("sidebar_login_form"):
+        pwd = st.text_input("Şifre", type="password", placeholder="Şifrenizi girin", label_visibility="collapsed")
+        submitted = st.form_submit_button("Giriş Yap", use_container_width=True)
+        if submitted:
+            if not ADMIN_PASSWORD:
+                st.error("ADMIN_PASSWORD yapılandırılmamış.")
+            elif pwd == ADMIN_PASSWORD:
+                st.session_state["authenticated"] = True
+                st.rerun()
+            else:
+                st.error("Hatalı şifre.")
 
 
 def _render_login_page() -> None:
@@ -236,23 +240,28 @@ def _render_login_page() -> None:
             background: #1a1d2e;
             border: 1px solid #2d3147;
             border-radius: 14px;
-            padding: 2.5rem 2rem;
+            padding: 2rem 2rem 1rem 2rem;
             text-align: center;
             box-shadow: 0 8px 32px rgba(0,0,0,0.4);
             margin-top: 4rem;
+            margin-bottom: 1rem;
         ">
             <div style="font-size: 2.5rem; margin-bottom: 0.5rem;">🖨️</div>
             <div style="font-size: 1.4rem; font-weight: 700; color: #f0f2f6; margin-bottom: 0.3rem;">AutoPrint Enterprise</div>
-            <div style="font-size: 0.85rem; color: #8b92a5; margin-bottom: 1.5rem;">Yönetim Paneli</div>
+            <div style="font-size: 0.85rem; color: #8b92a5;">Yönetim Paneli</div>
         </div>
         """, unsafe_allow_html=True)
-        pwd = st.text_input("Şifre", type="password", key="pwd_input_main", placeholder="Yönetici şifresi", label_visibility="collapsed")
-        if st.button("Giriş Yap", use_container_width=True, type="primary", key="login_btn_main"):
-            if ADMIN_PASSWORD and pwd == ADMIN_PASSWORD:
-                st.session_state["authenticated"] = True
-                st.rerun()
-            else:
-                st.error("Hatalı şifre.")
+        with st.form("main_login_form"):
+            pwd = st.text_input("Yönetici Şifresi", type="password", placeholder="Şifrenizi girin")
+            submitted = st.form_submit_button("Giriş Yap", type="primary", use_container_width=True)
+            if submitted:
+                if not ADMIN_PASSWORD:
+                    st.error("Sunucuda ADMIN_PASSWORD yapılandırılmamış.")
+                elif pwd == ADMIN_PASSWORD:
+                    st.session_state["authenticated"] = True
+                    st.rerun()
+                else:
+                    st.error("Hatalı şifre.")
 
 
 # ── Google Sheets bağlantısı (uygulama ömrü boyunca tek instance) ────────────

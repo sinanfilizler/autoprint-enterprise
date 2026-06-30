@@ -154,17 +154,26 @@ def _render_pending(sc, hq_auth: bool, admin_password: str) -> None:
     st.markdown("#### Pending Replacements")
 
     if not hq_auth:
-        pwd = st.text_input(
-            "HQ Şifresi", type="password", key="repl_hq_pwd",
-            placeholder="Headquarter şifresini girin",
-            label_visibility="collapsed",
+        st.markdown(
+            "<div style='background:#1a1d2e;border:1px solid #2d3147;border-radius:10px;"
+            "padding:1.2rem 1.4rem;margin-bottom:1rem;'>"
+            "<div style='font-size:1rem;font-weight:600;color:#f0f2f6;margin-bottom:0.3rem;'>"
+            "🔐 Headquarter Girişi</div>"
+            "<div style='font-size:0.8rem;color:#8b92a5;'>Bekleyen replacement'ları görmek için şifre gereklidir.</div>"
+            "</div>",
+            unsafe_allow_html=True,
         )
-        if st.button("Giriş", key="repl_hq_login"):
-            if admin_password and pwd == admin_password:
-                st.session_state["repl_hq_auth"] = True
-                st.rerun()
-            else:
-                st.error("Hatalı şifre.")
+        with st.form("hq_login_form"):
+            pwd = st.text_input("Admin Şifresi", type="password", placeholder="Yönetici şifresini girin")
+            submitted = st.form_submit_button("Giriş Yap", type="primary", use_container_width=True)
+            if submitted:
+                if not admin_password:
+                    st.error("Sunucuda ADMIN_PASSWORD yapılandırılmamış.")
+                elif pwd == admin_password:
+                    st.session_state["repl_hq_auth"] = True
+                    st.rerun()
+                else:
+                    st.error("Hatalı şifre.")
         return
 
     col_out, col_ref = st.columns([1, 1])
