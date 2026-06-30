@@ -16,6 +16,7 @@ from core.order_manager import OrderManager
 from core.parser import AmazonParser, ParseError
 from core.jsx_trigger import JSXTrigger, detect_product_type, resolve_font
 from listing_approval import render_listing_approval
+from replacement import render_replacement
 
 st.set_page_config(
     page_title="AutoPrint Enterprise",
@@ -217,8 +218,8 @@ def _check_auth() -> bool:
 
 def _render_login_sidebar() -> None:
     st.sidebar.markdown("### 🔐 Giriş")
-    pwd = st.sidebar.text_input("Şifre", type="password", key="pwd_input", label_visibility="collapsed", placeholder="Şifrenizi girin")
-    if st.sidebar.button("Giriş Yap", use_container_width=True):
+    pwd = st.sidebar.text_input("Şifre", type="password", key="pwd_input_sidebar", label_visibility="collapsed", placeholder="Şifrenizi girin")
+    if st.sidebar.button("Giriş Yap", use_container_width=True, key="login_btn_sidebar"):
         if ADMIN_PASSWORD and pwd == ADMIN_PASSWORD:
             st.session_state["authenticated"] = True
             st.rerun()
@@ -228,22 +229,30 @@ def _render_login_sidebar() -> None:
 
 def _render_login_page() -> None:
     """Giriş yapılmamışsa sayfa ortasında login kartı göster."""
-    st.markdown("""
-    <div style="
-        max-width: 400px;
-        margin: 6rem auto 0 auto;
-        background: #1a1d2e;
-        border: 1px solid #2d3147;
-        border-radius: 14px;
-        padding: 2.5rem 2rem;
-        text-align: center;
-        box-shadow: 0 8px 32px rgba(0,0,0,0.4);
-    ">
-        <div style="font-size: 2.5rem; margin-bottom: 0.5rem;">🖨️</div>
-        <div style="font-size: 1.4rem; font-weight: 700; color: #f0f2f6; margin-bottom: 0.3rem;">AutoPrint Enterprise</div>
-        <div style="font-size: 0.85rem; color: #8b92a5; margin-bottom: 2rem;">Yönetim Paneli</div>
-    </div>
-    """, unsafe_allow_html=True)
+    _, col, _ = st.columns([1, 2, 1])
+    with col:
+        st.markdown("""
+        <div style="
+            background: #1a1d2e;
+            border: 1px solid #2d3147;
+            border-radius: 14px;
+            padding: 2.5rem 2rem;
+            text-align: center;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+            margin-top: 4rem;
+        ">
+            <div style="font-size: 2.5rem; margin-bottom: 0.5rem;">🖨️</div>
+            <div style="font-size: 1.4rem; font-weight: 700; color: #f0f2f6; margin-bottom: 0.3rem;">AutoPrint Enterprise</div>
+            <div style="font-size: 0.85rem; color: #8b92a5; margin-bottom: 1.5rem;">Yönetim Paneli</div>
+        </div>
+        """, unsafe_allow_html=True)
+        pwd = st.text_input("Şifre", type="password", key="pwd_input_main", placeholder="Yönetici şifresi", label_visibility="collapsed")
+        if st.button("Giriş Yap", use_container_width=True, type="primary", key="login_btn_main"):
+            if ADMIN_PASSWORD and pwd == ADMIN_PASSWORD:
+                st.session_state["authenticated"] = True
+                st.rerun()
+            else:
+                st.error("Hatalı şifre.")
 
 
 # ── Google Sheets bağlantısı (uygulama ömrü boyunca tek instance) ────────────
@@ -361,11 +370,13 @@ if "last_result" in st.session_state:
             st.code(r["stderr"], language=None)
 
 if authenticated:
-    tab_upload, tab_queue, tab_dashboard, tab_admin, tab_listing = st.tabs(
-        ["📤 Yükle", "📋 Kuyruk", "📊 Dashboard", "⚙️ Admin", "📝 Listing Onay"]
+    tab_upload, tab_queue, tab_dashboard, tab_admin, tab_listing, tab_replacement = st.tabs(
+        ["📤 Yükle", "📋 Kuyruk", "📊 Dashboard", "⚙️ Admin", "📝 Listing Onay", "🔄 Replacement"]
     )
 else:
-    tab_upload, tab_listing = st.tabs(["📤 Yükle", "📝 Listing Onay"])
+    tab_upload, tab_listing, tab_replacement = st.tabs(
+        ["📤 Yükle", "📝 Listing Onay", "🔄 Replacement"]
+    )
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -500,6 +511,12 @@ with tab_upload:
 # ──────────────────────────────────────────────────────────────────────────────
 with tab_listing:
     render_listing_approval()
+
+# ──────────────────────────────────────────────────────────────────────────────
+# TAB: REPLACEMENT  (Add: şifresiz — Pending: HQ şifreli)
+# ──────────────────────────────────────────────────────────────────────────────
+with tab_replacement:
+    render_replacement(sc, authenticated, ADMIN_PASSWORD)
 
 # ──────────────────────────────────────────────────────────────────────────────
 # TAB 2: QUEUE  (sadece giriş yapılmışsa)

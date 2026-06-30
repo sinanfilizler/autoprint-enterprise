@@ -30,6 +30,7 @@ SPREADSHEET_ID = os.getenv("GOOGLE_SHEETS_SPREADSHEET_ID", "")
 QUEUE_SHEET = os.getenv("GOOGLE_SHEETS_QUEUE_SHEET", "Queue")
 LOG_SHEET = os.getenv("GOOGLE_SHEETS_LOG_SHEET", "Log")
 COSTS_SHEET = os.getenv("GOOGLE_SHEETS_COSTS_SHEET", "Costs")
+REPLACEMENTS_SHEET = "Replacements"
 
 # ── Sütun düzeni ────────────────────────────────────────────────────────────
 QUEUE_COLUMNS = [
@@ -43,6 +44,10 @@ QUEUE_COLUMNS = [
 
 LOG_COLUMNS = QUEUE_COLUMNS + ["processed_at"]
 COSTS_COLUMNS = ["sku", "cost"]
+REPLACEMENTS_COLUMNS = [
+    "replacement_id", "sku", "personalization", "replacement_type",
+    "status", "created_at", "label_pdf",
+]
 
 
 def _build_gspread_client() -> gspread.Client:
@@ -94,6 +99,7 @@ class SheetsClient:
         self._queue = self._get_or_create_sheet(QUEUE_SHEET, QUEUE_COLUMNS)
         self._log = self._get_or_create_sheet(LOG_SHEET, LOG_COLUMNS)
         self._costs = self._get_or_create_sheet(COSTS_SHEET, COSTS_COLUMNS)
+        self._replacements = self._get_or_create_sheet(REPLACEMENTS_SHEET, REPLACEMENTS_COLUMNS)
 
         self._cache: dict = {}  # key → (timestamp, value)
 
@@ -482,3 +488,29 @@ class SheetsClient:
 
         self._costs.append_row([sku, str(cost)], value_input_option="RAW")
         self._cache.pop("costs", None)
+
+    # ── Replacements API ─────────────────────────────────────────────────────
+
+    def add_replacement(self, data: dict) -> None:
+        """Replacements sheet'ine yeni satır ekler."""
+        row = [str(data.get(col, "")) for col in REPLACEMENTS_COLUMNS]
+        self._replacements.append_row(row, value_input_option="RAW")
+
+    def get_pending_replacements(self) -> list[dict]:
+        """status='pending' olan replacement'ları döner."""
+        records = self._replacements.get_all_records(default_blank="")
+        return [r for r in records if str(r.get("status", "")).strip() == "pending"]
+
+    def update_replacement_status(self, replacement_id: str, status: str) -> bool:
+        """replacement_id'ye göre status sütununu günceller. Başarılıysa True döner."""
+        rid = str(replacement_id).strip()
+        try:
+            rid_col = REPLACEMENTS_COLUMNS.index("replacement_id") + 1  # 1-indexed
+            cell = self._replacements.find(rid, in_column=rid_col)
+        except Exception:
+            return False
+        if cell is None:
+            return False
+        status_col = REPLACEMENTS_COLUMNS.index("status") + 1
+        self._replacements.update_cell(cell.row, status_col, status)
+        return True
