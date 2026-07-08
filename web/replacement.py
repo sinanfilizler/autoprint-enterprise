@@ -76,21 +76,11 @@ def _build_a4(sku: str, rtype: str, p_json: str, created: str, pdf_bytes: bytes 
 def _render_add(sc) -> None:
     st.markdown("#### Replacement Talebi Oluştur")
 
+    if "repl_items" not in st.session_state:
+        st.session_state["repl_items"] = []
+
     label_file = st.file_uploader(
         "Label PDF (tek sayfa)", type=["pdf"], key="repl_label_pdf"
-    )
-    sku = st.text_input("SKU", key="repl_sku", placeholder="CRMC1246")
-    persona_text = st.text_area(
-        "Personalization",
-        placeholder=(
-            "NAME: Alex\n"
-            "NAME_DAD: Michael\n"
-            "YEAR: 2026\n"
-            "MESSAGE: Merry Christmas\n"
-            "NOTE: gift box gönderilmemiş"
-        ),
-        height=160,
-        key="repl_persona",
     )
     repl_type = st.selectbox(
         "Replacement Tipi",
@@ -98,10 +88,50 @@ def _render_add(sc) -> None:
         key="repl_type",
     )
 
+    st.markdown("**Ürünler**")
+
+    # ── Mevcut ürün listesi ──────────────────────────────────────────────────
+    for i, it in enumerate(st.session_state["repl_items"]):
+        col_info, col_del = st.columns([6, 1])
+        with col_info:
+            preview = "  ·  ".join(f"{k}: {v}" for k, v in _parse_persona(it["personalization"]).items())[:70]
+            st.markdown(f"**{i+1}.** `{it['sku']}`  —  {preview or '—'}")
+        with col_del:
+            if st.button("✕", key=f"repl_del_{i}"):
+                st.session_state["repl_items"].pop(i)
+                st.rerun()
+
+    # ── Yeni ürün ekle ───────────────────────────────────────────────────────
+    with st.container(border=True):
+        new_sku = st.text_input("SKU", key="repl_new_sku", placeholder="CRMC1246")
+        new_persona = st.text_area(
+            "Personalization",
+            placeholder=(
+                "NAME: Alex\n"
+                "NAME_DAD: Michael\n"
+                "YEAR: 2026\n"
+                "MESSAGE: Merry Christmas\n"
+                "NOTE: gift box gönderilmemiş"
+            ),
+            height=130,
+            key="repl_new_persona",
+        )
+        if st.button("➕ Ürün Ekle", key="repl_add_item"):
+            if new_sku.strip():
+                st.session_state["repl_items"].append(
+                    {"sku": new_sku.strip(), "personalization": new_persona.strip()}
+                )
+                st.session_state["repl_new_sku"] = ""
+                st.session_state["repl_new_persona"] = ""
+                st.rerun()
+            else:
+                st.warning("SKU zorunludur.")
+
     if st.button("Gönder", type="primary", key="repl_submit"):
+        items = st.session_state["repl_items"]
         errors = []
-        if not sku.strip():
-            errors.append("SKU zorunludur.")
+        if not items:
+            errors.append("En az bir ürün ekleyin (➕ Ürün Ekle).")
         if not label_file:
             errors.append("Label PDF zorunludur.")
         if not sc:
@@ -112,28 +142,27 @@ def _render_add(sc) -> None:
             return
 
         pdf_bytes = label_file.read()
+
+        # Label önizleme
         png_bytes = _pdf_to_png(pdf_bytes)
+        if png_bytes:
+            st.image(png_bytes, caption="Label", use_container_width=True)
 
-        # Önizleme
-        st.markdown("---")
-        st.markdown("**Önizleme**")
-        cl, cr = st.columns(2)
-        with cl:
-            st.markdown(f"**SKU:** {sku.strip()}")
-            st.markdown(f"**Tip:** {repl_type}")
-            for k, v in _parse_persona(persona_text).items():
-                st.markdown(f"**{k}:** {v}")
-        with cr:
-            if png_bytes:
-                st.image(png_bytes, caption="Label", use_container_width=True)
-            else:
-                st.info("Label önizleme yok.")
+        # Personalization verisi: tek item → dict, birden fazla → list
+        if len(items) == 1:
+            sku_display  = items[0]["sku"]
+            persona_data = _parse_persona(items[0]["personalization"])
+        else:
+            sku_display  = f"{items[0]['sku']} +{len(items) - 1}"
+            persona_data = [
+                {"sku": it["sku"], "personalization": _parse_persona(it["personalization"])}
+                for it in items
+            ]
 
-        # Sheets'e yaz
         data = {
             "replacement_id":   str(uuid.uuid4()),
-            "sku":              sku.strip(),
-            "personalization":  json.dumps(_parse_persona(persona_text), ensure_ascii=False),
+            "sku":              sku_display,
+            "personalization":  json.dumps(persona_data, ensure_ascii=False),
             "replacement_type": repl_type,
             "status":           "pending",
             "created_at":       datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -142,7 +171,9 @@ def _render_add(sc) -> None:
         with st.spinner("Sheets'e kaydediliyor..."):
             try:
                 sc.add_replacement(data, pdf_bytes)
-                st.success("Gönderildi. Headquarter onayı bekleniyor.")
+                st.success(f"{len(items)} ürün gönderildi. Headquarter onayı bekleniyor.")
+                st.session_state["repl_items"] = []
+                st.rerun()
             except Exception as exc:
                 st.error(f"Kaydedilemedi: {exc}")
 
@@ -191,12 +222,20 @@ def _render_pending(sc) -> None:
 
             # ── Bilgi ──────────────────────────────────────────────────────
             st.markdown(f"**ID:** `{rid}`")
-            st.markdown(f"**SKU:** {sku}  |  **Tip:** {rtype}  |  **Tarih:** {created}")
+            st.markdown(f"**Tip:** {rtype}  |  **Tarih:** {created}")
             try:
-                persona = json.loads(p_json)
-                cols = st.columns(min(len(persona), 3) or 1)
-                for ci, (k, v) in enumerate(persona.items()):
-                    cols[ci % len(cols)].markdown(f"**{k}:** {v}")
+                p_data = json.loads(p_json)
+                if isinstance(p_data, list):
+                    for idx, it in enumerate(p_data):
+                        it_sku = it.get("sku", "?")
+                        it_persona = it.get("personalization", {})
+                        persona_str = "  ·  ".join(f"{k}: {v}" for k, v in it_persona.items())
+                        st.markdown(f"**{idx+1}.** `{it_sku}` — {persona_str or '—'}")
+                else:
+                    st.markdown(f"**SKU:** {sku}")
+                    cols = st.columns(min(len(p_data), 3) or 1)
+                    for ci, (k, v) in enumerate(p_data.items()):
+                        cols[ci % len(cols)].markdown(f"**{k}:** {v}")
             except Exception:
                 st.code(p_json)
 
@@ -261,23 +300,11 @@ def _render_pending(sc) -> None:
                     st.rerun()
 
 
-def _action_queue(sc, item: dict) -> None:
-    """Replacement'ı orders.json'a yazar, Illustrator'ı tetikler,
-    chunk'ları siler, status='queued' yapar."""
-    from core.jsx_trigger import JSXTrigger, detect_product_type
-    from core.order_manager import OrderManager
-
-    sku = item.get("sku", "")
-    rid = item.get("replacement_id", "")
-    try:
-        persona = json.loads(item.get("personalization", "{}"))
-    except Exception:
-        persona = {}
-
+def _persona_to_order(rid: str, item_sku: str, persona: dict, idx: int = 0) -> dict:
     order: dict = {
         "order_id":      f"REPL-{rid[:8]}",
-        "order_item_id": f"REPL-{rid}",
-        "sku":           sku,
+        "order_item_id": f"REPL-{rid}-{idx}",
+        "sku":           item_sku,
         "qty":           1,
         "name":          persona.get("NAME", persona.get("NAME_1", "")),
         "year":          persona.get("YEAR", ""),
@@ -289,21 +316,46 @@ def _action_queue(sc, item: dict) -> None:
     for pkey, n in [("NAME_DAD", 2), ("NAME_2", 3), ("NAME_3", 4)]:
         if pkey in persona:
             order[f"name{n}"] = persona[pkey]
+    return order
+
+
+def _action_queue(sc, item: dict) -> None:
+    """Replacement'ı orders.json'a yazar, Illustrator'ı tetikler,
+    chunk'ları siler, status='queued' yapar."""
+    from core.jsx_trigger import JSXTrigger, detect_product_type
+    from core.order_manager import OrderManager
+
+    rid = item.get("replacement_id", "")
+    try:
+        p_data = json.loads(item.get("personalization", "{}"))
+    except Exception:
+        p_data = {}
+
+    # Tek item (dict) veya çok item (list) formatını normalize et
+    if isinstance(p_data, list):
+        items_list = p_data  # [{"sku": "...", "personalization": {...}}, ...]
+    else:
+        items_list = [{"sku": item.get("sku", ""), "personalization": p_data}]
+
+    orders = []
+    for idx, it in enumerate(items_list):
+        orders.append(_persona_to_order(rid, it.get("sku", ""), it.get("personalization", {}), idx))
 
     try:
-        OrderManager().add_orders([order])
+        OrderManager().add_orders(orders)
     except Exception as exc:
         st.error(f"orders.json yazılamadı: {exc}")
         return
 
-    pt = detect_product_type(sku)
-    if pt == "unknown":
-        st.warning(f"SKU '{sku}' tanımlı değil — Illustrator tetiklenmedi.")
-    else:
+    known   = [o for o in orders if detect_product_type(o["sku"]) != "unknown"]
+    unknown = [o["sku"] for o in orders if detect_product_type(o["sku"]) == "unknown"]
+    if unknown:
+        st.warning(f"Tanımlı template yok (tetiklenmedi): {', '.join(set(unknown))}")
+    if known:
         try:
-            result = JSXTrigger().trigger_batch([order])
+            result = JSXTrigger().trigger_batch(known)
             if result["success"]:
-                st.success("Illustrator'a gönderildi.")
+                st.success(f"{len(known)} sipariş Illustrator'a gönderildi.")
             else:
                 st.warning(f"Illustrator hatası: {result.get('error', '?')}")
         except Exception as exc:
@@ -311,7 +363,7 @@ def _action_queue(sc, item: dict) -> None:
 
     sc.delete_replacement_label_chunks(rid)
     sc.update_replacement_status(rid, "queued")
-    st.success("Kuyruğa eklendi, label chunk'ları silindi.")
+    st.success("Kuyruğa eklendi.")
     st.rerun()
 
 
