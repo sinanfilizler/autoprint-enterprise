@@ -58,7 +58,17 @@ def _parse_persona(text: str) -> dict[str, str]:
 
 def _persona_to_text(persona_json: str) -> str:
     try:
-        return "\n".join(f"#{k}: {v}" for k, v in json.loads(persona_json).items())
+        data = json.loads(persona_json)
+        if isinstance(data, list):
+            lines = []
+            for it in data:
+                lines.append(f"SKU: {it.get('sku', '?')}")
+                for k, v in it.get("personalization", {}).items():
+                    lines.append(f"  {k}: {v}")
+                lines.append("")
+            return "\n".join(lines).strip()
+        else:
+            return "\n".join(f"{k}: {v}" for k, v in data.items())
     except Exception:
         return ""
 
