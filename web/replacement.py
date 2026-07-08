@@ -247,8 +247,6 @@ def _render_pending(sc) -> None:
             # ── Bilgi ──────────────────────────────────────────────────────
             st.markdown(f"**ID:** `{rid}`")
             st.markdown(f"**Tip:** {rtype}  |  **Tarih:** {created}")
-            with st.expander("🔍 Debug: raw personalization"):
-                st.code(repr(p_json))
             try:
                 p_data = json.loads(p_json)
                 if isinstance(p_data, list):
@@ -295,8 +293,6 @@ def _render_pending(sc) -> None:
                 if pdf_key not in st.session_state:
                     btn_label = "⬇️ Hazırla PDF" if chunk_count > 0 else "⬇️ PDF Yok"
                     if st.button(btn_label, key=f"repl_prep_{rid}", disabled=(chunk_count == 0)):
-                        persona_text_debug = _persona_to_text(p_json)
-                        st.code(f"persona_text:\n{persona_text_debug}", language=None)
                         with st.spinner("A4 PDF hazırlanıyor..."):
                             raw = sc.get_replacement_label(rid)
                             a4  = _build_a4(sku, rtype, p_json, created, raw)
