@@ -89,15 +89,35 @@ def build_a4_pdf(
     c.line(x, y, HALF_W - margin, y)
     y -= 6 * mm
 
-    persona = parse_personalization(personalization_text)
-    c.setFont("Helvetica", 10)
-    for key, value in persona.items():
+    for line in (personalization_text or "").splitlines():
         if y < 10 * mm:
             break
-        c.setFont("Helvetica-Bold", 10)
-        c.drawString(x + 3 * mm, y, f"{key}:")
-        c.setFont("Helvetica", 10)
-        c.drawString(x + 38 * mm, y, value)
+        line = line.rstrip()
+        if not line:
+            y -= 3 * mm
+            continue
+        if line.startswith("  ") or line.startswith("\t"):
+            # girinti: key-value satırı
+            stripped = line.strip()
+            if ":" in stripped:
+                key, _, val = stripped.partition(":")
+                c.setFont("Helvetica-Bold", 10)
+                c.drawString(x + 3 * mm, y, f"{key.strip()}:")
+                c.setFont("Helvetica", 10)
+                c.drawString(x + 38 * mm, y, val.strip())
+            else:
+                c.setFont("Helvetica", 10)
+                c.drawString(x + 3 * mm, y, stripped)
+        elif ":" in line:
+            # üst seviye: SKU satırı veya tek item key-value
+            key, _, val = line.partition(":")
+            c.setFont("Helvetica-Bold", 10)
+            c.drawString(x + 3 * mm, y, f"{key.strip()}:")
+            c.setFont("Helvetica", 10)
+            c.drawString(x + 38 * mm, y, val.strip())
+        else:
+            c.setFont("Helvetica", 10)
+            c.drawString(x + 3 * mm, y, line)
         y -= 6 * mm
 
     # Orta ayraç
