@@ -89,35 +89,25 @@ def build_a4_pdf(
     c.line(x, y, HALF_W - margin, y)
     y -= 6 * mm
 
-    for line in (personalization_text or "").splitlines():
+    for raw_line in (personalization_text or "").splitlines():
         if y < 10 * mm:
             break
-        line = line.rstrip()
-        if not line:
+        raw_line = raw_line.rstrip()
+        if not raw_line:
             y -= 3 * mm
             continue
-        if line.startswith("  ") or line.startswith("\t"):
-            # girinti: key-value satırı
-            stripped = line.strip()
-            if ":" in stripped:
-                key, _, val = stripped.partition(":")
-                c.setFont("Helvetica-Bold", 10)
-                c.drawString(x + 3 * mm, y, f"{key.strip()}:")
-                c.setFont("Helvetica", 10)
-                c.drawString(x + 38 * mm, y, val.strip())
-            else:
-                c.setFont("Helvetica", 10)
-                c.drawString(x + 3 * mm, y, stripped)
-        elif ":" in line:
-            # üst seviye: SKU satırı veya tek item key-value
+        indent = raw_line != raw_line.lstrip()
+        line = raw_line.strip()
+        x_off = (x + 8 * mm) if indent else (x + 3 * mm)
+        if ":" in line:
             key, _, val = line.partition(":")
             c.setFont("Helvetica-Bold", 10)
-            c.drawString(x + 3 * mm, y, f"{key.strip()}:")
+            c.drawString(x_off, y, f"{key.strip()}:")
             c.setFont("Helvetica", 10)
-            c.drawString(x + 38 * mm, y, val.strip())
+            c.drawString(x_off + 32 * mm, y, val.strip())
         else:
             c.setFont("Helvetica", 10)
-            c.drawString(x + 3 * mm, y, line)
+            c.drawString(x_off, y, line)
         y -= 6 * mm
 
     # Orta ayraç

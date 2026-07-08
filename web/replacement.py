@@ -56,9 +56,11 @@ def _parse_persona(text: str) -> dict[str, str]:
     return result
 
 
-def _persona_to_text(persona_json: str) -> str:
+def _persona_to_text(persona_json) -> str:
+    if not persona_json:
+        return ""
     try:
-        data = json.loads(persona_json)
+        data = json.loads(persona_json) if isinstance(persona_json, str) else persona_json
         if isinstance(data, list):
             lines = []
             for it in data:
@@ -67,10 +69,12 @@ def _persona_to_text(persona_json: str) -> str:
                     lines.append(f"  {k}: {v}")
                 lines.append("")
             return "\n".join(lines).strip()
-        else:
+        elif isinstance(data, dict):
             return "\n".join(f"{k}: {v}" for k, v in data.items())
+        else:
+            return str(data)
     except Exception:
-        return ""
+        return str(persona_json)
 
 
 # ── A4 PDF oluştur ───────────────────────────────────────────────────────────
