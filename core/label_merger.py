@@ -32,7 +32,7 @@ def parse_personalization(text: str) -> dict[str, str]:
 def build_a4_pdf(
     sku: str,
     replacement_type: str,
-    personalization_text: str,
+    items: list,
     created_at: str,
     label_image_bytes: bytes | None,
 ) -> bytes:
@@ -89,16 +89,24 @@ def build_a4_pdf(
     c.line(x, y, HALF_W - margin, y)
     y -= 6 * mm
 
-    c.setFont("Helvetica", 9)
-    for raw_line in (personalization_text or "").splitlines():
-        if y < 10 * mm:
+    for item in (items or []):
+        item_sku = str(item.get("sku", ""))
+        persona  = item.get("personalization", {})
+        if y < 15 * mm:
             break
-        text = raw_line.strip()
-        if not text:
-            y -= 3 * mm
-            continue
-        c.drawString(x + 3 * mm, y, text)
-        y -= 5 * mm
+        if item_sku:
+            c.setFont("Helvetica-Bold", 10)
+            c.setFillColorRGB(0, 0, 0)
+            c.drawString(x + 3 * mm, y, f"SKU: {item_sku}")
+            y -= 6 * mm
+        for k, v in persona.items():
+            if y < 10 * mm:
+                break
+            c.setFont("Helvetica", 9)
+            c.setFillColorRGB(0, 0, 0)
+            c.drawString(x + 6 * mm, y, f"{k}: {v}")
+            y -= 5 * mm
+        y -= 3 * mm
 
     # Orta ayraç
     c.setStrokeColorRGB(0.82, 0.82, 0.82)

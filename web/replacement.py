@@ -82,7 +82,15 @@ def _persona_to_text(persona_json) -> str:
 def _build_a4(sku: str, rtype: str, p_json: str, created: str, pdf_bytes: bytes | None) -> bytes:
     from core.label_merger import build_a4_pdf
     png = _pdf_to_png(pdf_bytes, dpi=120) if pdf_bytes else None
-    return build_a4_pdf(sku, rtype, _persona_to_text(p_json), created, png)
+    try:
+        data = json.loads(p_json) if isinstance(p_json, str) else p_json
+    except Exception:
+        data = {}
+    if isinstance(data, list):
+        items = data
+    else:
+        items = [{"sku": sku, "personalization": data}]
+    return build_a4_pdf(sku, rtype, items, created, png)
 
 
 # ── Bölüm 1: Add Replacement ─────────────────────────────────────────────────
