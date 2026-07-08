@@ -102,30 +102,29 @@ def _render_add(sc) -> None:
                 st.rerun()
 
     # ── Yeni ürün ekle ───────────────────────────────────────────────────────
-    with st.container(border=True):
-        new_sku = st.text_input("SKU", key="repl_new_sku", placeholder="CRMC1246")
-        new_persona = st.text_area(
-            "Personalization",
-            placeholder=(
-                "NAME: Alex\n"
-                "NAME_DAD: Michael\n"
-                "YEAR: 2026\n"
-                "MESSAGE: Merry Christmas\n"
-                "NOTE: gift box gönderilmemiş"
-            ),
-            height=130,
-            key="repl_new_persona",
-        )
-        if st.button("➕ Ürün Ekle", key="repl_add_item"):
-            if new_sku.strip():
-                st.session_state["repl_items"].append(
-                    {"sku": new_sku.strip(), "personalization": new_persona.strip()}
-                )
-                st.session_state["repl_new_sku"] = ""
-                st.session_state["repl_new_persona"] = ""
-                st.rerun()
-            else:
-                st.warning("SKU zorunludur.")
+    new_sku = st.text_input("SKU", key="repl_new_sku", placeholder="CRMC1246")
+    new_persona = st.text_area(
+        "Personalization",
+        placeholder=(
+            "NAME: Alex\n"
+            "NAME_DAD: Michael\n"
+            "YEAR: 2026\n"
+            "MESSAGE: Merry Christmas\n"
+            "NOTE: gift box gönderilmemiş"
+        ),
+        height=130,
+        key="repl_new_persona",
+    )
+    if st.button("➕ Ürün Ekle", key="repl_add_item"):
+        if new_sku.strip():
+            st.session_state["repl_items"].append(
+                {"sku": new_sku.strip(), "personalization": new_persona.strip()}
+            )
+            st.session_state["repl_new_sku"] = ""
+            st.session_state["repl_new_persona"] = ""
+            st.rerun()
+        else:
+            st.warning("SKU zorunludur.")
 
     if st.button("Gönder", type="primary", key="repl_submit"):
         items = st.session_state["repl_items"]
