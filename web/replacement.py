@@ -239,6 +239,8 @@ def _render_pending(sc) -> None:
             # ── Bilgi ──────────────────────────────────────────────────────
             st.markdown(f"**ID:** `{rid}`")
             st.markdown(f"**Tip:** {rtype}  |  **Tarih:** {created}")
+            with st.expander("🔍 Debug: raw personalization"):
+                st.code(repr(p_json))
             try:
                 p_data = json.loads(p_json)
                 if isinstance(p_data, list):
