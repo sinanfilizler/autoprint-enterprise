@@ -89,26 +89,16 @@ def build_a4_pdf(
     c.line(x, y, HALF_W - margin, y)
     y -= 6 * mm
 
+    c.setFont("Helvetica", 9)
     for raw_line in (personalization_text or "").splitlines():
         if y < 10 * mm:
             break
-        raw_line = raw_line.rstrip()
-        if not raw_line:
+        text = raw_line.strip()
+        if not text:
             y -= 3 * mm
             continue
-        indent = raw_line != raw_line.lstrip()
-        line = raw_line.strip()
-        x_off = (x + 8 * mm) if indent else (x + 3 * mm)
-        if ":" in line:
-            key, _, val = line.partition(":")
-            c.setFont("Helvetica-Bold", 10)
-            c.drawString(x_off, y, f"{key.strip()}:")
-            c.setFont("Helvetica", 10)
-            c.drawString(x_off + 32 * mm, y, val.strip())
-        else:
-            c.setFont("Helvetica", 10)
-            c.drawString(x_off, y, line)
-        y -= 6 * mm
+        c.drawString(x + 3 * mm, y, text)
+        y -= 5 * mm
 
     # Orta ayraç
     c.setStrokeColorRGB(0.82, 0.82, 0.82)
