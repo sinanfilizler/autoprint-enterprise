@@ -88,6 +88,9 @@ def _render_add(sc) -> None:
 
     if "repl_items" not in st.session_state:
         st.session_state["repl_items"] = []
+    if "repl_item_v" not in st.session_state:
+        st.session_state["repl_item_v"] = 0
+    v = st.session_state["repl_item_v"]
 
     label_file = st.file_uploader(
         "Label PDF (tek sayfa)", type=["pdf"], key="repl_label_pdf"
@@ -112,7 +115,7 @@ def _render_add(sc) -> None:
                 st.rerun()
 
     # ── Yeni ürün ekle ───────────────────────────────────────────────────────
-    new_sku = st.text_input("SKU", key="repl_new_sku", placeholder="CRMC1246")
+    new_sku = st.text_input("SKU", key=f"repl_new_sku_{v}", placeholder="CRMC1246")
     new_persona = st.text_area(
         "Personalization",
         placeholder=(
@@ -123,15 +126,14 @@ def _render_add(sc) -> None:
             "NOTE: gift box gönderilmemiş"
         ),
         height=130,
-        key="repl_new_persona",
+        key=f"repl_new_persona_{v}",
     )
-    if st.button("➕ Ürün Ekle", key="repl_add_item"):
+    if st.button("➕ Ürün Ekle", key=f"repl_add_item_{v}"):
         if new_sku.strip():
             st.session_state["repl_items"].append(
                 {"sku": new_sku.strip(), "personalization": new_persona.strip()}
             )
-            st.session_state["repl_new_sku"] = ""
-            st.session_state["repl_new_persona"] = ""
+            st.session_state["repl_item_v"] += 1
             st.rerun()
         else:
             st.warning("SKU zorunludur.")
@@ -182,6 +184,7 @@ def _render_add(sc) -> None:
                 sc.add_replacement(data, pdf_bytes)
                 st.success(f"{len(items)} ürün gönderildi. Headquarter onayı bekleniyor.")
                 st.session_state["repl_items"] = []
+                st.session_state["repl_item_v"] = 0
                 st.rerun()
             except Exception as exc:
                 st.error(f"Kaydedilemedi: {exc}")
