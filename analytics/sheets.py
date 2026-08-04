@@ -304,22 +304,16 @@ class SheetsClient:
         sheet_rows_to_delete = []  # sheet satır numaraları (1-indexed, başlık=1)
         found_oids = set()
 
+        log_header = self._get_sheet_columns(self._log)
+
         for i, row in enumerate(data_rows):
             cell_val = row[oid_col].strip() if oid_col < len(row) else ""
             if cell_val in oids:
-                # Queue satırını Log header uzunluğuna pad'le, sonuna processed_at ekle
-                log_header = self._get_sheet_columns(self._log)
-                target_len = len(log_header) if log_header else len(LOG_COLUMNS)
-                padded = list(row) + [""] * max(0, target_len - 1 - len(row))
-                # processed_at sütununu bul ve yaz
-                try:
-                    proc_col = log_header.index("processed_at") if log_header else target_len - 1
-                except ValueError:
-                    proc_col = target_len - 1
-                while len(padded) <= proc_col:
-                    padded.append("")
-                padded[proc_col] = now
-                log_rows_to_add.append(padded)
+                # Queue satırını sütun adına göre dict'e çevir, Log sırasına göre yaz
+                row_dict = {col: (row[j] if j < len(row) else "") for j, col in enumerate(header)}
+                row_dict["processed_at"] = now
+                log_row = [row_dict.get(col, "") for col in log_header]
+                log_rows_to_add.append(log_row)
                 sheet_rows_to_delete.append(i + 2)  # +1 header, +1 1-indexed
                 found_oids.add(cell_val)
 
