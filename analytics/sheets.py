@@ -309,15 +309,16 @@ class SheetsClient:
         for i, row in enumerate(data_rows):
             cell_val = row[oid_col].strip() if oid_col < len(row) else ""
             if cell_val in oids:
-                # Queue satırını sütun adına göre dict'e çevir, Log sırasına göre yaz
                 row_dict = {col: (row[j] if j < len(row) else "") for j, col in enumerate(header)}
-                row_dict["processed_at"] = now
-                log_row = [row_dict.get(col, "") for col in log_header]
-                log_rows_to_add.append(log_row)
+                # Manuel siparişler Log'a yazılmaz — Queue'dan silinir yeterli
+                if str(row_dict.get("is_manual", "")).upper() != "TRUE":
+                    row_dict["processed_at"] = now
+                    log_row = [row_dict.get(col, "") for col in log_header]
+                    log_rows_to_add.append(log_row)
                 sheet_rows_to_delete.append(i + 2)  # +1 header, +1 1-indexed
                 found_oids.add(cell_val)
 
-        if not log_rows_to_add:
+        if not sheet_rows_to_delete:
             return {"moved": 0, "not_found": list(oids)}
 
         # 1 write: batch log append
