@@ -669,7 +669,7 @@ with tab_dashboard:
             except ValueError:
                 return True
 
-        filtered_log = [r for r in log_rows if _in_range(r)]
+        filtered_log = [r for r in log_rows if _in_range(r) and not r.get("is_manual")]
 
         # ── Üst metrikler ───────────────────────────────────────────────────
         col1, col2, col3, col4 = st.columns(4)
@@ -685,7 +685,8 @@ with tab_dashboard:
         gift_count = sum(1 for r in filtered_log if r.get("gift_box"))
         gift_pct   = (gift_count / len(filtered_log) * 100) if filtered_log else 0.0
         col5.metric("Gift Box",        f"{gift_count}  ({gift_pct:.0f}%)")
-        col6.metric("Manuel Sipariş",  sum(1 for r in filtered_log if r.get("is_manual")))
+        total_qty = sum(int(r.get("qty", 1) or 1) for r in filtered_log)
+        col6.metric("Toplam Adet",     total_qty)
 
         nonzero_prices = [float(r.get("item_price", 0) or 0) for r in filtered_log if float(r.get("item_price", 0) or 0) > 0]
         avg_price = sum(nonzero_prices) / len(nonzero_prices) if nonzero_prices else 0.0
