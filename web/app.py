@@ -574,13 +574,12 @@ with tab_queue:
             with col_send:
                 if st.button("🖨️ Illustrator'a Gönder", type="primary", use_container_width=True):
                     orders = st.session_state.get("queue_orders", [])
-                    # Font mapping'i uygula: font_option → gerçek Illustrator font adı
-                    font_map = sc.get_font_mapping() if sc else {}
+                    # Font adlarını Illustrator'ın beklediği isme çevir
                     resolved_orders = []
                     for _o in orders:
                         _ro = dict(_o)
                         _pt = detect_product_type(_ro.get("sku", ""))
-                        _ro["font_option"] = resolve_font(_pt, _ro.get("font_option", "SERIF"), font_map)
+                        _ro["font_option"] = resolve_font(_pt, _ro.get("font_option", "SERIF"))
                         resolved_orders.append(_ro)
                     # Watchdog'un okuması için lokal orders.json'u da güncelle
                     order_mgr.save_orders(resolved_orders)
@@ -619,11 +618,10 @@ with tab_queue:
 
             with col_dry:
                 if st.button("🧪 Test Et (Dry-Run)", type="secondary", use_container_width=True):
-                    _dry_font_map = sc.get_font_mapping() if sc else {}
                     lines = []
                     for order in orders:
                         pt   = detect_product_type(order["sku"])
-                        font = resolve_font(pt, order.get("font_option", "SERIF"), _dry_font_map)
+                        font = resolve_font(pt, order.get("font_option", "SERIF"))
                         lines.append(
                             f"• [{order['order_item_id']}] SKU={order['sku']} "
                             f"→ tip={pt} font={font} renk={order.get('color_option','?')} "
@@ -968,45 +966,6 @@ with tab_admin:
         _get_sheets_client.clear()
         st.session_state.pop("sheets_error", None)
         st.rerun()
-
-    # ── Font Eşleştirme ───────────────────────────────────────────────────
-    st.divider()
-    st.write("### Font Eşleştirme")
-    st.caption("Siparişten gelen font adını Illustrator'ın beklediği font adıyla eşleştir.")
-    if sc:
-        try:
-            fm_rows = sc._font_mapping.get_all_records(default_blank="")
-        except Exception:
-            fm_rows = []
-
-        if fm_rows:
-            st.dataframe(pd.DataFrame(fm_rows), use_container_width=True)
-
-        with st.form("font_mapping_form"):
-            fc1, fc2 = st.columns(2)
-            fm_order = fc1.text_input("Siparişteki Font Adı", placeholder="Cookie")
-            fm_jsx   = fc2.text_input("Illustrator Font Adı", placeholder="Cookie")
-            if st.form_submit_button("Ekle / Güncelle"):
-                if fm_order.strip() and fm_jsx.strip():
-                    sc.upsert_font_mapping(fm_order.strip(), fm_jsx.strip())
-                    _get_sheets_client.clear()
-                    st.success(f"Eşleştirme kaydedildi: {fm_order.strip()} → {fm_jsx.strip()}")
-                    st.rerun()
-                else:
-                    st.error("Her iki alan da zorunludur.")
-
-        if fm_rows:
-            del_font = st.text_input("Sil (Siparişteki Font Adı)", key="del_font_name")
-            if st.button("Font Eşleştirmesini Sil", type="secondary", key="btn_del_font"):
-                if del_font.strip():
-                    if sc.delete_font_mapping(del_font.strip()):
-                        _get_sheets_client.clear()
-                        st.success(f"Silindi: {del_font.strip()}")
-                        st.rerun()
-                    else:
-                        st.error("Eşleştirme bulunamadı.")
-    else:
-        st.error("Bağlantı yok.")
 
     # ── Partner Yönetimi ───────────────────────────────────────────────────
     st.divider()
