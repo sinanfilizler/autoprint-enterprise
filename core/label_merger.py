@@ -51,6 +51,143 @@ def render_etsy_label_page(pdf_bytes: bytes, page_idx: int) -> bytes | None:
         return None
 
 
+def _make_etsy_order_overlay(
+    order_id: str,
+    items: list[dict],
+    page_w: float,
+    page_h: float,
+) -> bytes:
+    """
+    Etsy label sayfasının boş alt alanına (y=0-432 reportlab) order bilgisi yazar.
+    Label kutusu pdfplumber top=72-360 → reportlab y=432-720 arası → alt kısım boş.
+    Font/renk gösterilmez (Etsy siparişlerinde bu alanlar sabit).
+    """
+    MARGIN = 20
+    EMPTY_TOP_Y = page_h - 360 - 10  # label kutusunun hemen altı: ~422
+
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=(page_w, page_h))
+
+    y = EMPTY_TOP_Y
+
+    # Başlık
+    c.setFont("Helvetica-Bold", 13)
+    c.setFillColorRGB(0.1, 0.35, 0.7)
+    c.drawString(MARGIN, y, "ORDER")
+    y -= 15
+
+    # Order ID
+    c.setFont("Helvetica-Bold", 9)
+    c.setFillColorRGB(0, 0, 0)
+    c.drawString(MARGIN, y, f"Order: {order_id}")
+    y -= 10
+
+    # Ayraç
+    c.setStrokeColorRGB(0.6, 0.6, 0.6)
+    c.setLineWidth(0.5)
+    c.line(MARGIN, y + 3, page_w - MARGIN, y + 3)
+    y -= 10
+
+    PERSONA_KEYS = [
+        ("name",    "Name"),
+        ("name2",   "Name 2"),
+        ("name3",   "Name 3"),
+        ("name4",   "Name 4"),
+        ("name5",   "Name 5"),
+        ("name6",   "Name 6"),
+        ("name7",   "Name 7"),
+        ("name8",   "Name 8"),
+        ("name9",   "Name 9"),
+        ("name10",  "Name 10"),
+        ("year",    "Year"),
+        ("message", "Message"),
+        ("gift_box","Gift Box"),
+    ]
+
+    for item_idx, item in enumerate(items):
+        if y < 6:
+            break
+
+        sku = item.get("sku") or "—"
+        c.setFont("Helvetica-Bold", 9)
+        c.setFillColorRGB(0, 0, 0)
+        c.drawString(MARGIN, y, f"SKU: {sku}")
+        y -= 11
+
+        for key, label in PERSONA_KEYS:
+            val = item.get(key)
+            if not val:
+                continue
+            if y < 6:
+                break
+            text = f"{label}: {str(val)[:70]}"
+            c.setFont("Helvetica", 8.5)
+            c.setFillColorRGB(0.15, 0.15, 0.15)
+            c.drawString(MARGIN + 6, y, text)
+            y -= 10
+
+        # Gender name alanları (name_male, name_female, name2_male, ...)
+        for suffix, slabel in (("_male", "M"), ("_female", "F")):
+            for i in range(1, 11):
+                k = f"name{'' if i == 1 else i}{suffix}"
+                val = item.get(k)
+                if val and y >= 6:
+                    c.setFont("Helvetica", 8.5)
+                    c.setFillColorRGB(0.15, 0.15, 0.15)
+                    c.drawString(MARGIN + 6, y, f"Name {slabel}{'' if i == 1 else i}: {str(val)[:70]}")
+                    y -= 10
+
+        if item_idx < len(items) - 1 and y > 12:
+            c.setStrokeColorRGB(0.82, 0.82, 0.82)
+            c.setLineWidth(0.3)
+            c.line(MARGIN, y + 4, MARGIN + 120, y + 4)
+            y -= 8
+
+    c.save()
+    buf.seek(0)
+    return buf.getvalue()
+
+
+def build_etsy_overlay_pdf(
+    oid_source_map: dict[str, tuple[bytes, int]],
+    oid_to_items: dict[str, list[dict]],
+) -> bytes:
+    """
+    Eşleşen her Etsy siparişi için orijinal label sayfasını alır,
+    boş alt alana order bilgisi overlay'ler, tek çok sayfalı PDF döner.
+
+    oid_source_map: {order_id: (pdf_bytes, page_index)}
+    oid_to_items:   {order_id: [item_dict, ...]}
+    """
+    from pypdf import PdfReader, PdfWriter
+    from copy import deepcopy
+
+    writer = PdfWriter()
+
+    for oid, items in oid_to_items.items():
+        if oid not in oid_source_map:
+            continue
+        pdf_bytes, page_idx = oid_source_map[oid]
+
+        reader = PdfReader(io.BytesIO(pdf_bytes))
+        if page_idx >= len(reader.pages):
+            continue
+
+        label_page = deepcopy(reader.pages[page_idx])
+        page_w = float(label_page.mediabox.width)
+        page_h = float(label_page.mediabox.height)
+
+        overlay_bytes = _make_etsy_order_overlay(oid, items, page_w, page_h)
+        overlay_reader = PdfReader(io.BytesIO(overlay_bytes))
+        label_page.merge_page(overlay_reader.pages[0])
+        writer.add_page(label_page)
+
+    out = io.BytesIO()
+    writer.write(out)
+    out.seek(0)
+    return out.getvalue()
+
+
 def split_label_pdf(pdf_bytes: bytes) -> tuple[list[bytes], list[str]]:
     """
     Multi-page label PDF'ini ayırır.
