@@ -62,14 +62,31 @@ def detect_product_type(sku: str) -> str:
     return "unknown"
 
 
-def resolve_font(product_type: str, font_option: str) -> str:
+_BUILTIN_FONTS: dict[str, str] = {
+    "SERIF":   "MonotypeCorsiva",
+    "SANS":    "MonotypeCorsiva",
+    "SCRIPT":  "MonotypeCorsiva",
+    "WELCOME": "WelcomeChristmas",
+}
+
+
+def resolve_font(
+    product_type: str,
+    font_option: str,
+    font_map: dict[str, str] | None = None,
+) -> str:
     if product_type == "dog_round":
         return "WelcomeChristmas"
     if product_type == "snowglobe":
         return "JosephSophia"
-    if font_option == "WELCOME":
-        return "WelcomeChristmas"
-    return "MonotypeCorsiva"
+    # Sheets'ten gelen yapılandırılabilir mapping önce kontrol edilir
+    if font_map and font_option in font_map:
+        return font_map[font_option]
+    # Yerleşik kodlar
+    if font_option in _BUILTIN_FONTS:
+        return _BUILTIN_FONTS[font_option]
+    # Bilinmeyen ad: olduğu gibi geçir (Illustrator font adı olabilir)
+    return font_option or "MonotypeCorsiva"
 
 
 def resolve_color_rgb(product_type: str, color_option: str) -> tuple[int, int, int]:

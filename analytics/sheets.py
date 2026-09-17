@@ -47,6 +47,7 @@ QUEUE_COLUMNS = [
 LOG_COLUMNS = QUEUE_COLUMNS + ["processed_at"]
 COSTS_COLUMNS = ["sku", "cost"]
 PARTNERS_COLUMNS = ["partner_id", "partner_name", "active", "created_at"]
+FONT_MAPPING_COLUMNS = ["order_name", "jsx_name"]
 REPLACEMENTS_COLUMNS = [
     "replacement_id", "sku", "personalization", "replacement_type",
     "status", "created_at", "label_chunk_count",
@@ -110,6 +111,7 @@ class SheetsClient:
             REPLACEMENT_LABELS_SHEET, REPLACEMENT_LABELS_COLUMNS
         )
         self._partners = self._get_or_create_sheet("Partners", PARTNERS_COLUMNS)
+        self._font_mapping = self._get_or_create_sheet("FontMapping", FONT_MAPPING_COLUMNS)
 
         self._cache: dict = {}  # key → (timestamp, value)
 
@@ -679,6 +681,53 @@ class SheetsClient:
             if (row[pid_col].strip() if pid_col < len(row) else "") == pid:
                 self._partners.update_cell(i, active_col + 1, "FALSE")
                 self._cache.pop("partners", None)
+                return True
+        return False
+
+    # ── Font Eşleştirme ──────────────────────────────────────────────────────
+
+    def get_font_mapping(self) -> dict[str, str]:
+        """Sipariş font adı → JSX/Illustrator font adı eşleştirmesini döner (2dk cache)."""
+        cached = self._cache.get("font_mapping")
+        if cached and time.monotonic() - cached[0] < 120:
+            return cached[1]
+        rows = self._font_mapping.get_all_records(default_blank="")
+        result = {r["order_name"]: r["jsx_name"] for r in rows if r.get("order_name") and r.get("jsx_name")}
+        self._cache["font_mapping"] = (time.monotonic(), result)
+        return result
+
+    def upsert_font_mapping(self, order_name: str, jsx_name: str) -> None:
+        """Font eşleştirmesi ekler veya günceller."""
+        all_rows = self._font_mapping.get_all_values()
+        if len(all_rows) > 1:
+            header = all_rows[0]
+            try:
+                name_col = header.index("order_name")
+                jsx_col  = header.index("jsx_name")
+            except ValueError:
+                name_col, jsx_col = 0, 1
+            for i, row in enumerate(all_rows[1:], start=2):
+                if (row[name_col].strip() if name_col < len(row) else "") == order_name:
+                    self._font_mapping.update_cell(i, jsx_col + 1, jsx_name)
+                    self._cache.pop("font_mapping", None)
+                    return
+        self._font_mapping.append_row([order_name, jsx_name], value_input_option="RAW")
+        self._cache.pop("font_mapping", None)
+
+    def delete_font_mapping(self, order_name: str) -> bool:
+        """Font eşleştirmesini siler. Başarılıysa True döner."""
+        all_rows = self._font_mapping.get_all_values()
+        if len(all_rows) <= 1:
+            return False
+        header = all_rows[0]
+        try:
+            name_col = header.index("order_name")
+        except ValueError:
+            name_col = 0
+        for i, row in enumerate(all_rows[1:], start=2):
+            if (row[name_col].strip() if name_col < len(row) else "") == order_name:
+                self._font_mapping.delete_rows(i)
+                self._cache.pop("font_mapping", None)
                 return True
         return False
 
