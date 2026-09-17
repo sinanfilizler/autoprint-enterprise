@@ -58,35 +58,40 @@ def _make_etsy_order_overlay(
     page_h: float,
 ) -> bytes:
     """
-    Etsy label sayfasının boş alt alanına (y=0-432 reportlab) order bilgisi yazar.
-    Label kutusu pdfplumber top=72-360 → reportlab y=432-720 arası → alt kısım boş.
-    Font/renk gösterilmez (Etsy siparişlerinde bu alanlar sabit).
+    Etsy label overlay — portrait sayfanın alt boş alanına (reportlab y=0-432) yazar.
+
+    Konumlama mantığı (90° sağa döndürme varsayımı):
+      portrait y-ekseni → landscape x-ekseni
+      portrait y=MARGIN  → landscape sol kenar  (TOP-LEFT'e karşılık gelir)
+      portrait y=432     → landscape orta
+    Metin 0° yönünde (portrait'ta yatay) yazılır; landscape'de y artan yönde
+    (soldan sağa) okunur.
     """
     MARGIN = 20
-    EMPTY_TOP_Y = page_h - 360 - 10  # label kutusunun hemen altı: ~422
+    # Boş alan: portrait reportlab y=0 … label_bottom_y (=432)
+    LABEL_BOTTOM_Y = page_h - 360  # ≈ 432
 
     buf = io.BytesIO()
     c = canvas.Canvas(buf, pagesize=(page_w, page_h))
 
-    y = EMPTY_TOP_Y
+    # y=MARGIN'den başla (portrait alt kenar = landscape sol kenar = TOP-LEFT)
+    # Her yeni alan y += adım → landscape'de soldan sağa ilerler
+    y = MARGIN
+
+    def _put(text: str, bold: bool = False, size: float = 9, indent: float = 0,
+             color: tuple = (0, 0, 0)):
+        nonlocal y
+        if y >= LABEL_BOTTOM_Y - MARGIN:
+            return
+        c.setFont("Helvetica-Bold" if bold else "Helvetica", size)
+        c.setFillColorRGB(*color)
+        c.drawString(MARGIN + indent, y, text)
+        y += size + 3  # boyutun biraz üstünde boşluk
 
     # Başlık
-    c.setFont("Helvetica-Bold", 13)
-    c.setFillColorRGB(0.1, 0.35, 0.7)
-    c.drawString(MARGIN, y, "ORDER")
-    y -= 15
-
-    # Order ID
-    c.setFont("Helvetica-Bold", 9)
-    c.setFillColorRGB(0, 0, 0)
-    c.drawString(MARGIN, y, f"Order: {order_id}")
-    y -= 10
-
-    # Ayraç
-    c.setStrokeColorRGB(0.6, 0.6, 0.6)
-    c.setLineWidth(0.5)
-    c.line(MARGIN, y + 3, page_w - MARGIN, y + 3)
-    y -= 10
+    _put("ORDER", bold=True, size=13, color=(0.1, 0.35, 0.7))
+    _put(f"Order: {order_id}", bold=True, size=9)
+    y += 4  # ekstra boşluk
 
     PERSONA_KEYS = [
         ("name",    "Name"),
@@ -105,43 +110,28 @@ def _make_etsy_order_overlay(
     ]
 
     for item_idx, item in enumerate(items):
-        if y < 6:
+        if y >= LABEL_BOTTOM_Y - MARGIN:
             break
 
         sku = item.get("sku") or "—"
-        c.setFont("Helvetica-Bold", 9)
-        c.setFillColorRGB(0, 0, 0)
-        c.drawString(MARGIN, y, f"SKU: {sku}")
-        y -= 11
+        _put(f"SKU: {sku}", bold=True, size=9)
 
         for key, label in PERSONA_KEYS:
             val = item.get(key)
-            if not val:
-                continue
-            if y < 6:
-                break
-            text = f"{label}: {str(val)[:70]}"
-            c.setFont("Helvetica", 8.5)
-            c.setFillColorRGB(0.15, 0.15, 0.15)
-            c.drawString(MARGIN + 6, y, text)
-            y -= 10
+            if val:
+                _put(f"{label}: {str(val)[:70]}", size=8.5, indent=6,
+                     color=(0.15, 0.15, 0.15))
 
-        # Gender name alanları (name_male, name_female, name2_male, ...)
         for suffix, slabel in (("_male", "M"), ("_female", "F")):
             for i in range(1, 11):
                 k = f"name{'' if i == 1 else i}{suffix}"
                 val = item.get(k)
-                if val and y >= 6:
-                    c.setFont("Helvetica", 8.5)
-                    c.setFillColorRGB(0.15, 0.15, 0.15)
-                    c.drawString(MARGIN + 6, y, f"Name {slabel}{'' if i == 1 else i}: {str(val)[:70]}")
-                    y -= 10
+                if val:
+                    _put(f"Name {slabel}{'' if i == 1 else i}: {str(val)[:70]}",
+                         size=8.5, indent=6, color=(0.15, 0.15, 0.15))
 
-        if item_idx < len(items) - 1 and y > 12:
-            c.setStrokeColorRGB(0.82, 0.82, 0.82)
-            c.setLineWidth(0.3)
-            c.line(MARGIN, y + 4, MARGIN + 120, y + 4)
-            y -= 8
+        if item_idx < len(items) - 1:
+            y += 5  # item'lar arası boşluk
 
     c.save()
     buf.seek(0)
