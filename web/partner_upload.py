@@ -18,11 +18,8 @@ from core.parse_utils import parse_uploaded_files
 
 
 
-def _parse_labels(uploaded_pdfs) -> tuple[dict[str, bytes | None], list[str]]:
-    """
-    Her PDF için son sayfa(lar)daki order ID listesini + önceki sayfalardaki
-    label PNG'leri çıkarır. order_id → label_png dict döner.
-    """
+def _parse_labels_amazon(uploaded_pdfs) -> tuple[dict[str, bytes | None], list[str]]:
+    """Amazon: son sayfa(lar) order ID listesi, önceki sayfalar label."""
     from core.label_merger import split_label_pdf
     label_map: dict[str, bytes | None] = {}
     warnings: list[str] = []
@@ -45,12 +42,39 @@ def _parse_labels(uploaded_pdfs) -> tuple[dict[str, bytes | None], list[str]]:
         if len(label_pngs) != len(order_ids):
             warnings.append(
                 f"[{pdf_file.name}] Label sayısı ({len(label_pngs)}) ile "
-                f"order ID sayısı ({len(order_ids)}) farklı — "
-                "pozisyonel eşleştirme yapılıyor."
+                f"order ID sayısı ({len(order_ids)}) farklı — pozisyonel eşleştirme."
             )
 
         for i, oid in enumerate(order_ids):
             label_map[oid.strip()] = label_pngs[i] if i < len(label_pngs) else None
+
+    return label_map, warnings
+
+
+def _parse_labels_etsy(uploaded_pdfs) -> tuple[dict[str, bytes | None], list[str]]:
+    """Etsy: her sayfa kendi order ID'sini taşır ('Order #: <ID>')."""
+    from core.label_merger import extract_etsy_label_order_ids, render_etsy_label_page
+    label_map: dict[str, bytes | None] = {}
+    warnings: list[str] = []
+
+    for pdf_file in uploaded_pdfs:
+        pdf_bytes = pdf_file.read()
+        try:
+            oid_to_page = extract_etsy_label_order_ids(pdf_bytes)
+        except Exception as e:
+            warnings.append(f"[{pdf_file.name}] PDF parse hatası: {e}")
+            continue
+
+        if not oid_to_page:
+            warnings.append(
+                f"[{pdf_file.name}] 'Order #:' pattern bulunamadı. "
+                "Etsy label formatını kontrol edin."
+            )
+            continue
+
+        for oid, page_idx in oid_to_page.items():
+            png = render_etsy_label_page(pdf_bytes, page_idx)
+            label_map[oid] = png
 
     return label_map, warnings
 
@@ -129,7 +153,10 @@ def render_partner_upload(sc) -> None:
 
         # ── Adım 2: Label Parse ─────────────────────────────────────────────
         with st.spinner("Label PDF'ler işleniyor..."):
-            label_map, label_warns = _parse_labels(label_files or [])
+            if platform_key == "etsy":
+                label_map, label_warns = _parse_labels_etsy(label_files or [])
+            else:
+                label_map, label_warns = _parse_labels_amazon(label_files or [])
 
         all_warns = slip_warns + label_warns
         if all_warns:

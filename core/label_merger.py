@@ -13,10 +13,42 @@ from reportlab.lib.utils import ImageReader
 from reportlab.pdfgen import canvas
 
 _ORDER_ID_RE = re.compile(r'\b\d{3}-\d{7}-\d{7}\b')
+_ETSY_ORDER_ID_RE = re.compile(r'Order\s*#:\s*(\d+)')
 
 A4L = landscape(A4)
 PAGE_W, PAGE_H = A4L
 HALF_W = PAGE_W / 2
+
+
+def extract_etsy_label_order_ids(pdf_bytes: bytes) -> dict[str, int]:
+    """
+    Etsy label PDF'ini okur. Her sayfada "Order #: <ID>" arar.
+    Returns: {order_id: page_index} — her label sayfası kendi ID'sini taşır.
+    """
+    import pdfplumber
+    result: dict[str, int] = {}
+    with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
+        for page_idx, page in enumerate(pdf.pages):
+            text = page.extract_text() or ""
+            m = _ETSY_ORDER_ID_RE.search(text)
+            if m:
+                result[m.group(1).strip()] = page_idx
+    return result
+
+
+def render_etsy_label_page(pdf_bytes: bytes, page_idx: int) -> bytes | None:
+    """Etsy label PDF'inden tek sayfayı PNG olarak render eder."""
+    try:
+        import pypdfium2 as pdfium
+        doc = pdfium.PdfDocument(pdf_bytes)
+        if page_idx >= len(doc):
+            return None
+        bitmap = doc[page_idx].render(scale=150 / 72)
+        buf = io.BytesIO()
+        bitmap.to_pil().save(buf, format="PNG")
+        return buf.getvalue()
+    except Exception:
+        return None
 
 
 def split_label_pdf(pdf_bytes: bytes) -> tuple[list[bytes], list[str]]:
