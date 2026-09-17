@@ -6,30 +6,16 @@ Packing slip (HTML/TXT) + label PDF (çok sayfalı) yükle,
 eşleştir, Queue'ya ekle, birleşik PDF indir.
 """
 
-import tempfile
+import sys
 from collections import defaultdict
 from pathlib import Path
 
 import streamlit as st
 
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from core.parse_utils import parse_uploaded_files
 
-def _parse_slips(uploaded_files) -> tuple[list[dict], list[str]]:
-    from core.parser import AmazonParser, ParseError
-    orders, warnings = [], []
-    for uf in uploaded_files:
-        suffix = Path(uf.name).suffix
-        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-            tmp.write(uf.read())
-            tmp_path = tmp.name
-        try:
-            parsed, warns = AmazonParser(tmp_path).parse()
-            orders.extend(parsed)
-            warnings.extend([f"[{uf.name}] {w}" for w in warns])
-        except (FileNotFoundError, ParseError) as e:
-            warnings.append(f"[{uf.name}] {e}")
-        except Exception as e:
-            warnings.append(f"[{uf.name}] Beklenmeyen hata: {e}")
-    return orders, warnings
+
 
 
 def _parse_labels(uploaded_pdfs) -> tuple[dict[str, bytes | None], list[str]]:
@@ -102,14 +88,28 @@ def render_partner_upload(sc) -> None:
 
     st.divider()
 
+    platform = st.radio(
+        "Kaynak Platform", ["Amazon", "Etsy"],
+        horizontal=True, key="pu_platform"
+    )
+    platform_key = platform.lower()
+
     col_slip, col_label = st.columns(2)
     with col_slip:
-        slip_files = st.file_uploader(
-            "Packing Slip (.html, .htm, .txt)",
-            type=["html", "htm", "txt"],
-            accept_multiple_files=True,
-            key="pu_slips",
-        )
+        if platform_key == "amazon":
+            slip_files = st.file_uploader(
+                "Packing Slip (.html, .htm, .txt)",
+                type=["html", "htm", "txt"],
+                accept_multiple_files=True,
+                key="pu_slips",
+            )
+        else:
+            slip_files = st.file_uploader(
+                "Etsy Packing Slip PDF",
+                type=["pdf"],
+                accept_multiple_files=True,
+                key="pu_slips",
+            )
     with col_label:
         label_files = st.file_uploader(
             "Label PDF — son sayfa(lar) order listesi içermeli",
@@ -125,7 +125,7 @@ def render_partner_upload(sc) -> None:
     if st.button("⚙️ İşle", type="primary", key="pu_process"):
         # ── Adım 1: Packing Slip Parse ──────────────────────────────────────
         with st.spinner("Packing slip'ler parse ediliyor..."):
-            orders, slip_warns = _parse_slips(slip_files or [])
+            orders, slip_warns = parse_uploaded_files(slip_files or [], platform_key)
 
         # ── Adım 2: Label Parse ─────────────────────────────────────────────
         with st.spinner("Label PDF'ler işleniyor..."):
@@ -181,6 +181,7 @@ def render_partner_upload(sc) -> None:
             for o in orders_by_oid[oid]:
                 o_copy = dict(o)
                 o_copy["source"] = selected_id
+                o_copy.setdefault("platform", platform_key)
                 orders_to_queue.append(o_copy)
 
         with st.spinner("Ana kuyruğa ekleniyor..."):

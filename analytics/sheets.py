@@ -41,7 +41,7 @@ QUEUE_COLUMNS = [
     "name6", "name7", "name8", "name9", "name10",
     "year", "message", "font_option", "color_option",
     "gift_box", "item_price", "shipping_fee",
-    "seller_name", "order_date", "is_manual", "source", "added_at",
+    "seller_name", "order_date", "is_manual", "platform", "source", "added_at",
 ]
 
 LOG_COLUMNS = QUEUE_COLUMNS + ["processed_at"]
@@ -685,12 +685,10 @@ class SheetsClient:
 
 # ── Modül düzeyinde yardımcı fonksiyonlar ────────────────────────────────────
 
-def get_partner_stats(log_rows: list[dict], days: int | None = None) -> dict[str, dict]:
-    """
-    Log satırlarından partner bazlı istatistik üretir.
-    days verilirse processed_at üzerinden filtreler.
-    Returns: {"internal": {"orders": N, "items": N}, "partner_id": {...}, ...}
-    """
+def _groupby_stats(
+    log_rows: list[dict], group_key: str, default_val: str, days: int | None = None
+) -> dict[str, dict]:
+    """Log satırlarını group_key sütununa göre gruplar. Manuel siparişleri dahil etmez."""
     from datetime import date, timedelta
     cutoff = (date.today() - timedelta(days=days)) if days else None
     stats: dict[str, dict] = {}
@@ -704,9 +702,19 @@ def get_partner_stats(log_rows: list[dict], days: int | None = None) -> dict[str
                     continue
             except ValueError:
                 pass
-        source = str(r.get("source", "") or "").strip() or "internal"
-        if source not in stats:
-            stats[source] = {"orders": 0, "items": 0}
-        stats[source]["orders"] += 1
-        stats[source]["items"] += int(r.get("qty", 1) or 1)
+        val = str(r.get(group_key, "") or "").strip() or default_val
+        if val not in stats:
+            stats[val] = {"orders": 0, "items": 0}
+        stats[val]["orders"] += 1
+        stats[val]["items"] += int(r.get("qty", 1) or 1)
     return stats
+
+
+def get_partner_stats(log_rows: list[dict], days: int | None = None) -> dict[str, dict]:
+    """source kolonuna göre partner istatistikleri. {"internal": {"orders": N, "items": N}, ...}"""
+    return _groupby_stats(log_rows, "source", "internal", days)
+
+
+def get_platform_stats(log_rows: list[dict], days: int | None = None) -> dict[str, dict]:
+    """platform kolonuna göre istatistikler. {"amazon": {"orders": N, "items": N}, "etsy": {...}}"""
+    return _groupby_stats(log_rows, "platform", "amazon", days)

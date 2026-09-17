@@ -15,6 +15,7 @@ load_dotenv()
 from core.order_manager import OrderManager
 from core.parser import AmazonParser, ParseError
 from core.jsx_trigger import JSXTrigger, detect_product_type, resolve_font
+from core.parse_utils import parse_uploaded_files
 from listing_approval import render_listing_approval
 from replacement import render_replacement
 from partner_upload import render_partner_upload
@@ -396,29 +397,27 @@ else:
 with tab_upload:
     st.subheader("Packing Slip Yükle")
 
-    uploaded_files = st.file_uploader(
-        "HTML veya TXT packing slip dosyası seçin",
-        type=["html", "htm", "txt"],
-        accept_multiple_files=True,
+    upload_platform = st.radio(
+        "Kaynak", ["Amazon", "Etsy"], horizontal=True, key="upload_platform"
     )
+    upload_platform_key = upload_platform.lower()
+
+    if upload_platform_key == "amazon":
+        uploaded_files = st.file_uploader(
+            "HTML veya TXT packing slip dosyası seçin",
+            type=["html", "htm", "txt"],
+            accept_multiple_files=True,
+        )
+    else:
+        uploaded_files = st.file_uploader(
+            "Etsy Packing Slip PDF",
+            type=["pdf"],
+            accept_multiple_files=True,
+        )
 
     if uploaded_files:
-        all_parsed, all_warnings = [], []
-
-        for uf in uploaded_files:
-            suffix = Path(uf.name).suffix
-            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-                tmp.write(uf.read())
-                tmp_path = tmp.name
-
-            try:
-                parsed, warnings = AmazonParser(tmp_path).parse()
-                all_parsed.extend(parsed)
-                all_warnings.extend([f"[{uf.name}] {w}" for w in warnings])
-            except (FileNotFoundError, ParseError) as e:
-                all_warnings.append(f"[{uf.name}] {e}")
-            except Exception as e:
-                st.error(f"[{uf.name}] Beklenmeyen hata: {type(e).__name__}: {e}")
+        with st.spinner("Parse ediliyor..."):
+            all_parsed, all_warnings = parse_uploaded_files(uploaded_files, upload_platform_key)
 
         if all_warnings:
             with st.expander(f"⚠️ {len(all_warnings)} uyarı"):
@@ -428,6 +427,7 @@ with tab_upload:
         if all_parsed:
             for o in all_parsed:
                 o.setdefault("source", "internal")
+                o.setdefault("platform", upload_platform_key)
             st.success(f"{len(all_parsed)} sipariş parse edildi. Aşağıyı kontrol edin:")
             st.dataframe(_orders_to_df(all_parsed), use_container_width=True)
 
@@ -861,7 +861,7 @@ with tab_dashboard:
 
         # ── Partner Bazlı İstatistikler ─────────────────────────────────────
         st.markdown("#### Partner Bazlı İstatistikler")
-        from analytics.sheets import get_partner_stats
+        from analytics.sheets import get_partner_stats, get_platform_stats
         partner_filter_col, _ = st.columns([2, 4])
         with partner_filter_col:
             partner_period = st.selectbox(
@@ -878,10 +878,24 @@ with tab_dashboard:
                 partner_rows.append({"Partner": label, "Sipariş Sayısı": stat["orders"], "Ürün Adedi": stat["items"]})
             partner_df = pd.DataFrame(partner_rows)
             st.dataframe(partner_df, use_container_width=True)
-            chart_data = partner_df.set_index("Partner")["Sipariş Sayısı"]
-            st.bar_chart(chart_data)
+            st.bar_chart(partner_df.set_index("Partner")["Sipariş Sayısı"])
         else:
             st.info("Bu dönemde partner verisi yok.")
+
+        st.divider()
+
+        # ── Platform Bazlı İstatistikler ─────────────────────────────────────
+        st.markdown("#### Platform Bazlı İstatistikler")
+        plat_stats = get_platform_stats(log_rows, days=partner_days)
+        if plat_stats:
+            plat_rows = []
+            for plat, stat in sorted(plat_stats.items(), key=lambda x: -x[1]["orders"]):
+                plat_rows.append({"Platform": plat.capitalize(), "Sipariş Sayısı": stat["orders"], "Ürün Adedi": stat["items"]})
+            plat_df = pd.DataFrame(plat_rows)
+            st.dataframe(plat_df, use_container_width=True)
+            st.bar_chart(plat_df.set_index("Platform")["Sipariş Sayısı"])
+        else:
+            st.info("Bu dönemde platform verisi yok.")
 
 
 # ──────────────────────────────────────────────────────────────────────────────
