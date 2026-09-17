@@ -17,6 +17,7 @@ from core.parser import AmazonParser, ParseError
 from core.jsx_trigger import JSXTrigger, detect_product_type, resolve_font
 from listing_approval import render_listing_approval
 from replacement import render_replacement
+from partner_upload import render_partner_upload
 
 st.set_page_config(
     page_title="AutoPrint Enterprise",
@@ -306,6 +307,7 @@ def _orders_to_df(orders: list[dict]) -> pd.DataFrame:
             "Kargo ($)":   o.get("shipping_fee", 0.0),
             "Gift Box":    "✓" if o.get("gift_box") else "✗",
             "Manuel":      "✓" if o.get("is_manual") else "",
+            "Kaynak":      o.get("source", "internal") or "internal",
         })
     return pd.DataFrame(rows)
 
@@ -379,12 +381,12 @@ if "last_result" in st.session_state:
             st.code(r["stderr"], language=None)
 
 if authenticated:
-    tab_upload, tab_queue, tab_dashboard, tab_admin, tab_listing, tab_replacement = st.tabs(
-        ["📤 Yükle", "📋 Kuyruk", "📊 Dashboard", "⚙️ Admin", "📝 Listing Onay", "🔄 Replacement"]
+    tab_upload, tab_partner, tab_queue, tab_dashboard, tab_admin, tab_listing, tab_replacement = st.tabs(
+        ["📤 Yükle", "🤝 Partner", "📋 Kuyruk", "📊 Dashboard", "⚙️ Admin", "📝 Listing Onay", "🔄 Replacement"]
     )
 else:
-    tab_upload, tab_listing, tab_replacement = st.tabs(
-        ["📤 Yükle", "📝 Listing Onay", "🔄 Replacement"]
+    tab_upload, tab_partner, tab_listing, tab_replacement = st.tabs(
+        ["📤 Yükle", "🤝 Partner", "📝 Listing Onay", "🔄 Replacement"]
     )
 
 
@@ -424,6 +426,8 @@ with tab_upload:
                     st.warning(w)
 
         if all_parsed:
+            for o in all_parsed:
+                o.setdefault("source", "internal")
             st.success(f"{len(all_parsed)} sipariş parse edildi. Aşağıyı kontrol edin:")
             st.dataframe(_orders_to_df(all_parsed), use_container_width=True)
 
@@ -502,6 +506,7 @@ with tab_upload:
                     "font_option":    m_font,
                     "color_option":   m_color,
                     "is_manual":      True,
+                    "source":         "internal",
                 }
                 for i, name_val in enumerate(m_names[1:], start=2):
                     if name_val.strip():
@@ -514,6 +519,12 @@ with tab_upload:
                 else:
                     st.warning("Bu sipariş zaten kuyrukta veya işlendi.")
 
+
+# ──────────────────────────────────────────────────────────────────────────────
+# TAB: PARTNER UPLOAD  (her kullanıcı erişebilir)
+# ──────────────────────────────────────────────────────────────────────────────
+with tab_partner:
+    render_partner_upload(sc)
 
 # ──────────────────────────────────────────────────────────────────────────────
 # TAB: LISTING APPROVAL  (her kullanıcı erişebilir)
@@ -846,6 +857,32 @@ with tab_dashboard:
         else:
             st.info("Seçilen dönemde işlenmiş sipariş yok.")
 
+        st.divider()
+
+        # ── Partner Bazlı İstatistikler ─────────────────────────────────────
+        st.markdown("#### Partner Bazlı İstatistikler")
+        from analytics.sheets import get_partner_stats
+        partner_filter_col, _ = st.columns([2, 4])
+        with partner_filter_col:
+            partner_period = st.selectbox(
+                "Dönem", ["Tüm Zamanlar", "Son 30 Gün", "Son 7 Gün"],
+                key="dash_partner_period", label_visibility="collapsed"
+            )
+        partner_days = {"Son 7 Gün": 7, "Son 30 Gün": 30}.get(partner_period)
+        pstats = get_partner_stats(log_rows, days=partner_days)
+
+        if pstats:
+            partner_rows = []
+            for src, stat in sorted(pstats.items(), key=lambda x: -x[1]["orders"]):
+                label = "İç Sipariş" if src == "internal" else src
+                partner_rows.append({"Partner": label, "Sipariş Sayısı": stat["orders"], "Ürün Adedi": stat["items"]})
+            partner_df = pd.DataFrame(partner_rows)
+            st.dataframe(partner_df, use_container_width=True)
+            chart_data = partner_df.set_index("Partner")["Sipariş Sayısı"]
+            st.bar_chart(chart_data)
+        else:
+            st.info("Bu dönemde partner verisi yok.")
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # TAB 4: ADMIN
@@ -908,6 +945,44 @@ with tab_admin:
         _get_sheets_client.clear()
         st.session_state.pop("sheets_error", None)
         st.rerun()
+
+    # ── Partner Yönetimi ───────────────────────────────────────────────────
+    st.divider()
+    st.write("### Partner Yönetimi")
+    if sc:
+        with st.form("partner_add_form"):
+            pc1, pc2 = st.columns(2)
+            new_pid   = pc1.text_input("Partner ID (slug)", placeholder="musteri_a")
+            new_pname = pc2.text_input("Görünen İsim", placeholder="Müşteri A")
+            if st.form_submit_button("Partner Ekle"):
+                if new_pid.strip() and new_pname.strip():
+                    sc.add_partner(new_pid.strip(), new_pname.strip())
+                    _get_sheets_client.clear()
+                    st.success(f"Partner eklendi: {new_pname.strip()} ({new_pid.strip()})")
+                    st.rerun()
+                else:
+                    st.error("Partner ID ve İsim zorunludur.")
+
+        try:
+            all_partners = sc._partners.get_all_records(default_blank="")
+        except Exception:
+            all_partners = []
+
+        if all_partners:
+            st.dataframe(pd.DataFrame(all_partners), use_container_width=True)
+            deact_id = st.text_input("Deaktif Et (Partner ID)", key="deact_pid")
+            if st.button("Deaktif Et", type="secondary", key="btn_deact_partner"):
+                if deact_id.strip():
+                    if sc.deactivate_partner(deact_id.strip()):
+                        _get_sheets_client.clear()
+                        st.success(f"{deact_id} deaktif edildi.")
+                        st.rerun()
+                    else:
+                        st.error("Partner bulunamadı.")
+        else:
+            st.info("Henüz partner yok.")
+    else:
+        st.error("Bağlantı yok.")
 
     # Tehlikeli işlemler
     st.divider()

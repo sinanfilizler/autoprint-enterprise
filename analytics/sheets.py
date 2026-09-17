@@ -41,11 +41,12 @@ QUEUE_COLUMNS = [
     "name6", "name7", "name8", "name9", "name10",
     "year", "message", "font_option", "color_option",
     "gift_box", "item_price", "shipping_fee",
-    "seller_name", "order_date", "is_manual", "added_at",
+    "seller_name", "order_date", "is_manual", "source", "added_at",
 ]
 
 LOG_COLUMNS = QUEUE_COLUMNS + ["processed_at"]
 COSTS_COLUMNS = ["sku", "cost"]
+PARTNERS_COLUMNS = ["partner_id", "partner_name", "active", "created_at"]
 REPLACEMENTS_COLUMNS = [
     "replacement_id", "sku", "personalization", "replacement_type",
     "status", "created_at", "label_chunk_count",
@@ -108,6 +109,7 @@ class SheetsClient:
         self._replacement_labels = self._get_or_create_sheet(
             REPLACEMENT_LABELS_SHEET, REPLACEMENT_LABELS_COLUMNS
         )
+        self._partners = self._get_or_create_sheet("Partners", PARTNERS_COLUMNS)
 
         self._cache: dict = {}  # key → (timestamp, value)
 
@@ -625,3 +627,86 @@ class SheetsClient:
         status_col = REPLACEMENTS_COLUMNS.index("status") + 1
         self._replacements.update_cell(cell.row, status_col, status)
         return True
+
+    # ── Partners API ─────────────────────────────────────────────────────────
+
+    def get_partners(self) -> list[dict]:
+        """active=TRUE olan partnerleri döner (2dk cache)."""
+        cached = self._cache.get("partners")
+        if cached and time.monotonic() - cached[0] < 120:
+            return cached[1]
+        records = self._partners.get_all_records(default_blank="")
+        result = [r for r in records if str(r.get("active", "")).upper() == "TRUE"]
+        self._cache["partners"] = (time.monotonic(), result)
+        return result
+
+    def add_partner(self, partner_id: str, partner_name: str) -> None:
+        """Yeni partner ekler veya varsa aktive eder."""
+        pid = partner_id.strip().lower()
+        pname = partner_name.strip()
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        all_rows = self._partners.get_all_values()
+        if len(all_rows) > 1:
+            header = all_rows[0]
+            try:
+                pid_col    = header.index("partner_id")
+                pname_col  = header.index("partner_name")
+                active_col = header.index("active")
+            except ValueError:
+                pid_col, pname_col, active_col = 0, 1, 2
+            for i, row in enumerate(all_rows[1:], start=2):
+                if (row[pid_col].strip() if pid_col < len(row) else "") == pid:
+                    self._partners.update_cell(i, pname_col + 1, pname)
+                    self._partners.update_cell(i, active_col + 1, "TRUE")
+                    self._cache.pop("partners", None)
+                    return
+        self._partners.append_row([pid, pname, "TRUE", now], value_input_option="RAW")
+        self._cache.pop("partners", None)
+
+    def deactivate_partner(self, partner_id: str) -> bool:
+        """Partner'ı deaktif eder. Başarılıysa True döner."""
+        pid = partner_id.strip()
+        all_rows = self._partners.get_all_values()
+        if len(all_rows) <= 1:
+            return False
+        header = all_rows[0]
+        try:
+            pid_col    = header.index("partner_id")
+            active_col = header.index("active")
+        except ValueError:
+            return False
+        for i, row in enumerate(all_rows[1:], start=2):
+            if (row[pid_col].strip() if pid_col < len(row) else "") == pid:
+                self._partners.update_cell(i, active_col + 1, "FALSE")
+                self._cache.pop("partners", None)
+                return True
+        return False
+
+
+# ── Modül düzeyinde yardımcı fonksiyonlar ────────────────────────────────────
+
+def get_partner_stats(log_rows: list[dict], days: int | None = None) -> dict[str, dict]:
+    """
+    Log satırlarından partner bazlı istatistik üretir.
+    days verilirse processed_at üzerinden filtreler.
+    Returns: {"internal": {"orders": N, "items": N}, "partner_id": {...}, ...}
+    """
+    from datetime import date, timedelta
+    cutoff = (date.today() - timedelta(days=days)) if days else None
+    stats: dict[str, dict] = {}
+    for r in log_rows:
+        if r.get("is_manual"):
+            continue
+        if cutoff:
+            proc = str(r.get("processed_at", "") or "")[:10]
+            try:
+                if date.fromisoformat(proc) < cutoff:
+                    continue
+            except ValueError:
+                pass
+        source = str(r.get("source", "") or "").strip() or "internal"
+        if source not in stats:
+            stats[source] = {"orders": 0, "items": 0}
+        stats[source]["orders"] += 1
+        stats[source]["items"] += int(r.get("qty", 1) or 1)
+    return stats
