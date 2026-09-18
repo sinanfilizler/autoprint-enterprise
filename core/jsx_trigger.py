@@ -37,13 +37,11 @@ def detect_product_type(sku: str) -> str:
     if sku.startswith("ACRY2"):
         return "dog_round"
 
-    # Template klasör kontrolü — ACRY snowglobe olabilir
+    # Template klasör kontrolü — glob ile: boşluk/büyük-küçük harf farkları sorun çıkarmaz
     template_base = Path(TEMPLATE_BASE)
     for shape in ("snowglobe", "heart_ceramic", "round_ceramic"):
         folder = template_base / shape
-        if (folder / f"{sku}.ai").exists():
-            return shape
-        if (folder / f"{sku}_template.ai").exists():
+        if any(folder.glob(f"{sku}.ai")) or any(folder.glob(f"{sku}_template*.ai")):
             return shape
 
     # Template yok — prefix'e göre etiketle
