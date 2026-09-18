@@ -44,7 +44,7 @@ QUEUE_COLUMNS = [
     "seller_name", "order_date", "is_manual", "platform", "source", "added_at",
 ]
 
-LOG_COLUMNS = QUEUE_COLUMNS + ["processed_at"]
+LOG_COLUMNS = QUEUE_COLUMNS + ["processed_at", "has_giftbox"]
 COSTS_COLUMNS = ["sku", "cost"]
 PARTNERS_COLUMNS = ["partner_id", "partner_name", "active", "created_at"]
 REPLACEMENTS_COLUMNS = [
@@ -174,7 +174,11 @@ class SheetsClient:
             elif col == "is_manual":
                 row.append("TRUE" if order.get("is_manual") else "FALSE")
             elif col == "gift_box":
-                row.append("TRUE" if order.get("gift_box") else "FALSE")
+                gv = order.get("gift_box", "")
+                if isinstance(gv, bool):
+                    row.append("TRUE" if gv else "FALSE")
+                else:
+                    row.append("TRUE" if str(gv).strip().upper() in ("YES", "TRUE", "1") else "FALSE")
             elif col == "qty":
                 row.append(str(order.get("qty", 1)))
             elif col in ("item_price", "shipping_fee"):
@@ -195,6 +199,10 @@ class SheetsClient:
                 r["is_manual"] = str(r["is_manual"]).upper() == "TRUE"
             if "gift_box" in r:
                 r["gift_box"] = str(r["gift_box"]).upper() == "TRUE"
+            if "has_giftbox" in r:
+                r["has_giftbox"] = str(r["has_giftbox"]).upper() == "TRUE"
+            else:
+                r["has_giftbox"] = r.get("gift_box", False)
             if "item_price" in r:
                 try:
                     r["item_price"] = float(r["item_price"])
@@ -312,6 +320,9 @@ class SheetsClient:
             cell_val = row[oid_col].strip() if oid_col < len(row) else ""
             if cell_val in oids:
                 row_dict = {col: (row[j] if j < len(row) else "") for j, col in enumerate(header)}
+                # has_giftbox: gift_box Queue alanından (doğrudan extra_fields da kontrol edilir)
+                gv = str(row_dict.get("gift_box", "")).strip().upper()
+                row_dict["has_giftbox"] = "TRUE" if gv == "TRUE" else "FALSE"
                 # Manuel siparişler Log'a yazılmaz — Queue'dan silinir yeterli
                 if str(row_dict.get("is_manual", "")).upper() != "TRUE":
                     row_dict["processed_at"] = now
@@ -704,14 +715,24 @@ def _groupby_stats(
                 pass
         val = str(r.get(group_key, "") or "").strip() or default_val
         if val not in stats:
-            stats[val] = {"orders": 0, "items": 0}
+            stats[val] = {"orders": 0, "items": 0, "giftboxes": 0}
         stats[val]["orders"] += 1
         stats[val]["items"] += int(r.get("qty", 1) or 1)
+        # has_giftbox: yeni kolon; yoksa gift_box'tan fall-back (eski veri uyumu)
+        has_gb = r.get("has_giftbox", False)
+        if not has_gb:
+            has_gb = r.get("gift_box", False)
+        if has_gb:
+            stats[val]["giftboxes"] += 1
     return stats
 
 
 def get_partner_stats(log_rows: list[dict], days: int | None = None) -> dict[str, dict]:
-    """source kolonuna göre partner istatistikleri. {"internal": {"orders": N, "items": N}, ...}"""
+    """
+    source kolonuna göre partner istatistikleri.
+    {"internal": {"orders": N, "items": N, "giftboxes": N}, ...}
+    internal ve partner siparişleri kesinlikle ayrı gruplandırılır — kaynaşma riski yok.
+    """
     return _groupby_stats(log_rows, "source", "internal", days)
 
 

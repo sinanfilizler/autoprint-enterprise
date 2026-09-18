@@ -882,7 +882,12 @@ with tab_dashboard:
             partner_rows = []
             for src, stat in sorted(pstats.items(), key=lambda x: -x[1]["orders"]):
                 label = "İç Sipariş" if src == "internal" else src
-                partner_rows.append({"Partner": label, "Sipariş Sayısı": stat["orders"], "Ürün Adedi": stat["items"]})
+                partner_rows.append({
+                    "Partner":          label,
+                    "Sipariş Sayısı":   stat["orders"],
+                    "Ürün Adedi (Piece)": stat["items"],
+                    "Gift Box Sayısı":  stat.get("giftboxes", 0),
+                })
             partner_df = pd.DataFrame(partner_rows)
             st.dataframe(partner_df, use_container_width=True)
             st.bar_chart(partner_df.set_index("Partner")["Sipariş Sayısı"])
