@@ -290,7 +290,7 @@ def _orders_to_df(orders: list[dict], font_map: dict | None = None) -> pd.DataFr
     rows = []
     for o in orders:
         pt = detect_product_type(o.get("sku", ""))
-        font = resolve_font(pt, o.get("font_option", "SERIF"), font_map)
+        font = resolve_font(pt, o.get("font_option", "SERIF"))
         rows.append({
             "Order ID":    o.get("order_id", ""),
             "Item ID":     o.get("order_item_id", ""),
