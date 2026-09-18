@@ -12,25 +12,18 @@ Private notes formatı (Etsy private-notes alanında seller tarafından):
   ...
 
 Her değer de # ile başladığı için klasik satır bazlı ayrım çalışmaz.
-Çözüm: pdfplumber'ın karıştırdığı iki sütun gürültüsünü görmezden gelmek
-için re.findall(r'#(\\S+)') ile salt token çıkarımı yapılır; bilinen
-anahtar kelimeler KEY, diğerleri VALUE olarak yorumlanır.
+Çözüm: re.findall(r'#(\\S+)') ile tüm token'lar çıkarılır; SKU ile
+başlayan her section'da çift-tek (alternating) pozisyon kullanılır:
+  0=KEY, 1=VALUE, 2=KEY, 3=VALUE …
+
+Bu sayede DOG_NAME, ANIMAL gibi özel field'lar da otomatik yakalanır;
+known-tags listesi gerekmez.
 """
 
 import re
 from pathlib import Path
 
 _FOOTER_MARKERS = ["Do the green thing", "do the green thing"]
-
-# Bilinen field isimlerinin büyük harf seti — bunlar KEY, geri kalanlar VALUE
-_KNOWN_TAGS: frozenset[str] = frozenset([
-    "SKU", "QUANTITY", "QTY",
-    "NAME", "NAME_MALE", "NAME_FEMALE",
-    "YEAR", "MESSAGE",
-    "FONT", "FONT_OPTION",
-    "COLOR", "COLOR_OPTION",
-    "GIFTBOX", "GENDER", "STATE", "TEAM", "NUMBER",
-])
 
 
 class EtsyParser:
@@ -146,16 +139,13 @@ class EtsyParser:
     ) -> tuple[dict | None, list[str]]:
         warnings: list[str] = []
 
-        # Bilinen KEY → VALUE çiftleri
+        # Alternating pozisyon: 0=KEY, 1=VALUE, 2=KEY, 3=VALUE …
+        # Herhangi bir #TAG otomatik KEY — known-list gerekmez.
         kv_pairs: list[tuple[str, str]] = []
-        current_key: str | None = None
-        for tok in tokens:
-            upper = tok.upper()
-            if upper in _KNOWN_TAGS:
-                current_key = upper
-            elif current_key is not None:
-                kv_pairs.append((current_key, tok))
-                current_key = None
+        for i in range(0, len(tokens) - 1, 2):
+            key = tokens[i].upper()
+            val = tokens[i + 1]
+            kv_pairs.append((key, val))
 
         # Field mapping
         sku = ""

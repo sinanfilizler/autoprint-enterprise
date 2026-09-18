@@ -138,8 +138,10 @@ def build_etsy_batch_pdf(
                     k = f"name{'' if i == 1 else i}{suffix}"
                     if item.get(k):
                         persona_fields.append((k, f"NAME ({slabel}{'' if i == 1 else i})"))
+            # Custom / bilinmeyen field'lar (DOG_NAME, ANIMAL vb.)
+            extra_fields = item.get("extra_fields") or {}
 
-            if persona_fields:
+            if persona_fields or extra_fields:
                 c.setFont("Helvetica-Bold", 9)
                 c.setFillColorRGB(0, 0, 0)
                 c.drawString(x, y, "Personalization")
@@ -161,6 +163,18 @@ def build_etsy_batch_pdf(
                     c.setFont("Helvetica", 9)
                     c.setFillColorRGB(0.1, 0.1, 0.1)
                     c.drawString(val_x, y, str(item.get(key, ""))[:50])
+                    y -= 5.5 * mm
+
+                for ef_key, ef_val in extra_fields.items():
+                    if y < 12 * mm:
+                        break
+                    lbl = ef_key.replace("_", " ")
+                    c.setFont("Helvetica-Bold", 9)
+                    c.setFillColorRGB(0, 0, 0)
+                    c.drawString(lbl_x, y, f"{lbl}:")
+                    c.setFont("Helvetica", 9)
+                    c.setFillColorRGB(0.1, 0.1, 0.1)
+                    c.drawString(val_x, y, str(ef_val)[:50])
                     y -= 5.5 * mm
 
             if item_idx < len(items) - 1:
