@@ -58,80 +58,103 @@ def _make_etsy_order_overlay(
     page_h: float,
 ) -> bytes:
     """
-    Etsy label overlay — portrait sayfanın alt boş alanına (reportlab y=0-432) yazar.
+    Etsy label overlay — iki şey yapar:
 
-    Konumlama mantığı (90° sağa döndürme varsayımı):
-      portrait y-ekseni → landscape x-ekseni
-      portrait y=MARGIN  → landscape sol kenar  (TOP-LEFT'e karşılık gelir)
-      portrait y=432     → landscape orta
-    Metin 0° yönünde (portrait'ta yatay) yazılır; landscape'de y artan yönde
-    (soldan sağa) okunur.
+    1. Header maskesi: üst header satırlarını (pdfplumber top=0-72 = reportlab y=720-792)
+       beyaz rect ile örter; sadece siyah çerçeveli USPS kutusu görünür.
+
+    2. Order bilgisi: 90° CCW döndürülmüş (canvas.rotate(90)) metin bloğu.
+       Fiziksel olarak sayfa 90° CW döndürüldüğünde metin dik (normal) okunur.
+
+       Koordinat mantığı (90° CW döndürme varsayımı):
+         portrait x eksenı  →  landscape y ekseni (azalan)
+         portrait y eksenı  →  landscape x ekseni (artan)
+         portrait sağ kenar (x≈612) → landscape alt kenar
+         portrait alt kenar (y≈0)   → landscape sol kenar
+
+       Sol alt köşeden başlamak = portrait (x≈612-MARGIN, y=MARGIN).
+       Her yeni satır local_y arttıkça portrait x azalır → landscape y artar (yukarı çıkar).
     """
-    MARGIN = 20
-    # Boş alan: portrait reportlab y=0 … label_bottom_y (=432)
-    LABEL_BOTTOM_Y = page_h - 360  # ≈ 432
+    MARGIN = 15
+    LABEL_TOP_RL  = page_h - 72   # 720 — label kutusunun üst sınırı
+    # LABEL_BOTTOM_RL = page_h - 360  # 432 — kullanılmıyor, metin x-ekseninde ilerliyor
 
-    buf = io.BytesIO()
-    c = canvas.Canvas(buf, pagesize=(page_w, page_h))
-
-    # y=MARGIN'den başla (portrait alt kenar = landscape sol kenar = TOP-LEFT)
-    # Her yeni alan y += adım → landscape'de soldan sağa ilerler
-    y = MARGIN
-
-    def _put(text: str, bold: bool = False, size: float = 9, indent: float = 0,
-             color: tuple = (0, 0, 0)):
-        nonlocal y
-        if y >= LABEL_BOTTOM_Y - MARGIN:
-            return
-        c.setFont("Helvetica-Bold" if bold else "Helvetica", size)
-        c.setFillColorRGB(*color)
-        c.drawString(MARGIN + indent, y, text)
-        y += size + 3  # boyutun biraz üstünde boşluk
-
-    # Başlık
-    _put("ORDER", bold=True, size=13, color=(0.1, 0.35, 0.7))
-    _put(f"Order: {order_id}", bold=True, size=9)
-    y += 4  # ekstra boşluk
+    TITLE_SIZE = 11
+    FONT_SIZE  = 9
+    TITLE_H    = TITLE_SIZE + 5
+    LINE_H     = FONT_SIZE  + 4
 
     PERSONA_KEYS = [
-        ("name",    "Name"),
-        ("name2",   "Name 2"),
-        ("name3",   "Name 3"),
-        ("name4",   "Name 4"),
-        ("name5",   "Name 5"),
-        ("name6",   "Name 6"),
-        ("name7",   "Name 7"),
-        ("name8",   "Name 8"),
-        ("name9",   "Name 9"),
-        ("name10",  "Name 10"),
-        ("year",    "Year"),
-        ("message", "Message"),
+        ("name",    "Name"),     ("name2",  "Name 2"),  ("name3",  "Name 3"),
+        ("name4",   "Name 4"),   ("name5",  "Name 5"),  ("name6",  "Name 6"),
+        ("name7",   "Name 7"),   ("name8",  "Name 8"),  ("name9",  "Name 9"),
+        ("name10",  "Name 10"),  ("year",   "Year"),    ("message","Message"),
         ("gift_box","Gift Box"),
     ]
 
+    # İçerik listesi
+    entries: list[tuple[str, str]] = []
+    entries.append(("title", f"Order: {order_id}"))
     for item_idx, item in enumerate(items):
-        if y >= LABEL_BOTTOM_Y - MARGIN:
-            break
-
         sku = item.get("sku") or "—"
-        _put(f"SKU: {sku}", bold=True, size=9)
-
+        entries.append(("bold", f"SKU: {sku}"))
         for key, label in PERSONA_KEYS:
             val = item.get(key)
             if val:
-                _put(f"{label}: {str(val)[:70]}", size=8.5, indent=6,
-                     color=(0.15, 0.15, 0.15))
-
+                entries.append(("normal", f"{label}: {str(val)[:55]}"))
         for suffix, slabel in (("_male", "M"), ("_female", "F")):
             for i in range(1, 11):
                 k = f"name{'' if i == 1 else i}{suffix}"
                 val = item.get(k)
                 if val:
-                    _put(f"Name {slabel}{'' if i == 1 else i}: {str(val)[:70]}",
-                         size=8.5, indent=6, color=(0.15, 0.15, 0.15))
-
+                    entries.append(("normal",
+                                    f"Name {slabel}{'' if i == 1 else i}: {str(val)[:55]}"))
         if item_idx < len(items) - 1:
-            y += 5  # item'lar arası boşluk
+            entries.append(("gap", ""))
+
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=(page_w, page_h))
+
+    # ── 1. Header maskesi ────────────────────────────────────────────────────
+    c.setFillColorRGB(1, 1, 1)
+    c.rect(0, LABEL_TOP_RL, page_w, page_h - LABEL_TOP_RL, fill=1, stroke=0)
+
+    # ── 2. Döndürülmüş order bilgisi ────────────────────────────────────────
+    # ty = portrait alt kenar (= landscape sol kenar, sabit tüm satırlarda)
+    ty = MARGIN
+    # tx başlangıcı = portrait sağ kenar (= landscape alt kenar = "sol alt köşe")
+    tx_start = page_w - MARGIN
+
+    local_y = 0  # portrait x'ten çıkarılacak; arttıkça landscape'de yukarı çıkar
+
+    for etype, text in entries:
+        tx = tx_start - local_y
+        if tx < MARGIN:   # sayfanın sol kenarını aşma
+            break
+
+        c.saveState()
+        c.translate(tx, ty)
+        c.rotate(90)      # CCW; sonuç: local x = portrait y yönü (yukarı)
+
+        if etype == "title":
+            c.setFont("Helvetica-Bold", TITLE_SIZE)
+            c.setFillColorRGB(0.08, 0.30, 0.65)
+            c.drawString(0, 0, text)
+            local_y += TITLE_H
+        elif etype == "bold":
+            c.setFont("Helvetica-Bold", FONT_SIZE)
+            c.setFillColorRGB(0, 0, 0)
+            c.drawString(0, 0, text)
+            local_y += LINE_H
+        elif etype == "normal":
+            c.setFont("Helvetica", FONT_SIZE)
+            c.setFillColorRGB(0.15, 0.15, 0.15)
+            c.drawString(0, 0, text)
+            local_y += LINE_H
+        elif etype == "gap":
+            local_y += 5
+
+        c.restoreState()
 
     c.save()
     buf.seek(0)
