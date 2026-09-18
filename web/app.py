@@ -451,12 +451,16 @@ with tab_upload:
                         with st.spinner("Google Sheets'e yazılıyor..."):
                             result = sc.append_queue(all_parsed)
                         st.session_state["last_upload"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                        st.success(
-                            f"{result['added']} sipariş eklendi, "
-                            f"{result['skipped_duplicates']} duplicate atlandı."
-                        )
-                        if result["skipped_ids"]:
-                            st.info(f"Atlanan ID'ler: {', '.join(result['skipped_ids'])}")
+                        if result["added"] > 0:
+                            st.success(f"✅ {result['added']} sipariş kuyruğa eklendi.")
+                        if result["skipped_duplicates"] > 0:
+                            st.warning(
+                                f"⚠️ {result['skipped_duplicates']} sipariş atlandı — "
+                                f"zaten kuyrukta veya daha önce işlenmiş. "
+                                f"ID'ler: {', '.join(result['skipped_ids'])}"
+                            )
+                        if result["added"] == 0 and result["skipped_duplicates"] == 0:
+                            st.error("Hiç sipariş eklenemedi.")
                     else:
                         st.error("Google Sheets bağlantısı yok — sipariş eklenemiyor.")
         else:
