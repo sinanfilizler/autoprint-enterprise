@@ -231,14 +231,14 @@ def render_partner_upload(sc) -> None:
         with st.spinner("PDF hazırlanıyor..."):
             try:
                 if platform_key == "etsy":
-                    # Etsy: orijinal label sayfasına order bilgisi overlay et
-                    from core.label_merger import build_etsy_overlay_pdf
+                    # Etsy: kırpılmış + döndürülmüş label + sol metin bloğu (A4 landscape)
+                    from core.label_merger import build_etsy_batch_pdf
                     oid_source_map = {
                         oid: (etsy_oid_to_pdf[oid], etsy_oid_to_page[oid])
                         for oid in matched_oids
                         if oid in etsy_oid_to_pdf
                     }
-                    pdf_bytes = build_etsy_overlay_pdf(
+                    pdf_bytes = build_etsy_batch_pdf(
                         oid_source_map,
                         {oid: orders_by_oid[oid] for oid in matched_oids},
                     )

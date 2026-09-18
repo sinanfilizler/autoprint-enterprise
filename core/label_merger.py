@@ -36,169 +36,169 @@ def extract_etsy_label_order_ids(pdf_bytes: bytes) -> dict[str, int]:
     return result
 
 
-def render_etsy_label_page(pdf_bytes: bytes, page_idx: int) -> bytes | None:
-    """Etsy label PDF'inden tek sayfayı PNG olarak render eder."""
+def _render_etsy_label_upright(pdf_bytes: bytes, page_idx: int) -> bytes | None:
+    """
+    Etsy label sayfasından USPS label kutusunu kırpır ve 90° CW döndürür.
+    Çıktı: Dik ve okunabilir USPS label PNG bytes.
+
+    pdfplumber koordinatları (fiziksel top'tan):
+      Header  : top=0-72  (kırpılır)
+      Label   : x=90-522, top=72-360  (kullanılan alan)
+    """
     try:
         import pypdfium2 as pdfium
-        doc = pdfium.PdfDocument(pdf_bytes)
-        if page_idx >= len(doc):
-            return None
-        bitmap = doc[page_idx].render(scale=150 / 72)
-        buf = io.BytesIO()
-        bitmap.to_pil().save(buf, format="PNG")
-        return buf.getvalue()
-    except Exception:
+    except ImportError:
         return None
 
+    SCALE = 150 / 72
+    doc = pdfium.PdfDocument(pdf_bytes)
+    if page_idx >= len(doc):
+        return None
 
-def _make_etsy_order_overlay(
-    order_id: str,
-    items: list[dict],
-    page_w: float,
-    page_h: float,
-) -> bytes:
-    """
-    Etsy label overlay — iki şey yapar:
+    bitmap = doc[page_idx].render(scale=SCALE)
+    img = bitmap.to_pil()
+    W, H = img.size
 
-    1. Header maskesi: üst header satırlarını (pdfplumber top=0-72 = reportlab y=720-792)
-       beyaz rect ile örter; sadece siyah çerçeveli USPS kutusu görünür.
+    PAD = 5  # pt cinsinden kenar payı
+    left  = max(0, int((90 - PAD) * SCALE))
+    upper = max(0, int((72 - PAD) * SCALE))
+    right = min(W, int((522 + PAD) * SCALE))
+    lower = min(H, int((360 + PAD) * SCALE))
 
-    2. Order bilgisi: 90° CCW döndürülmüş (canvas.rotate(90)) metin bloğu.
-       Fiziksel olarak sayfa 90° CW döndürüldüğünde metin dik (normal) okunur.
-
-       Koordinat mantığı (90° CW döndürme varsayımı):
-         portrait x eksenı  →  landscape y ekseni (azalan)
-         portrait y eksenı  →  landscape x ekseni (artan)
-         portrait sağ kenar (x≈612) → landscape alt kenar
-         portrait alt kenar (y≈0)   → landscape sol kenar
-
-       Sol alt köşeden başlamak = portrait (x≈612-MARGIN, y=MARGIN).
-       Her yeni satır local_y arttıkça portrait x azalır → landscape y artar (yukarı çıkar).
-    """
-    MARGIN = 15
-    LABEL_TOP_RL  = page_h - 72   # 720 — label kutusunun üst sınırı
-    # LABEL_BOTTOM_RL = page_h - 360  # 432 — kullanılmıyor, metin x-ekseninde ilerliyor
-
-    TITLE_SIZE = 11
-    FONT_SIZE  = 9
-    TITLE_H    = TITLE_SIZE + 5
-    LINE_H     = FONT_SIZE  + 4
-
-    PERSONA_KEYS = [
-        ("name",    "Name"),     ("name2",  "Name 2"),  ("name3",  "Name 3"),
-        ("name4",   "Name 4"),   ("name5",  "Name 5"),  ("name6",  "Name 6"),
-        ("name7",   "Name 7"),   ("name8",  "Name 8"),  ("name9",  "Name 9"),
-        ("name10",  "Name 10"),  ("year",   "Year"),    ("message","Message"),
-        ("gift_box","Gift Box"),
-    ]
-
-    # İçerik listesi
-    entries: list[tuple[str, str]] = []
-    entries.append(("title", f"Order: {order_id}"))
-    for item_idx, item in enumerate(items):
-        sku = item.get("sku") or "—"
-        entries.append(("bold", f"SKU: {sku}"))
-        for key, label in PERSONA_KEYS:
-            val = item.get(key)
-            if val:
-                entries.append(("normal", f"{label}: {str(val)[:55]}"))
-        for suffix, slabel in (("_male", "M"), ("_female", "F")):
-            for i in range(1, 11):
-                k = f"name{'' if i == 1 else i}{suffix}"
-                val = item.get(k)
-                if val:
-                    entries.append(("normal",
-                                    f"Name {slabel}{'' if i == 1 else i}: {str(val)[:55]}"))
-        if item_idx < len(items) - 1:
-            entries.append(("gap", ""))
+    label_crop = img.crop((left, upper, right, lower))
+    upright = label_crop.rotate(-90, expand=True)  # 90° CW → dik okunabilir
 
     buf = io.BytesIO()
-    c = canvas.Canvas(buf, pagesize=(page_w, page_h))
-
-    # ── 1. Header maskesi ────────────────────────────────────────────────────
-    c.setFillColorRGB(1, 1, 1)
-    c.rect(0, LABEL_TOP_RL, page_w, page_h - LABEL_TOP_RL, fill=1, stroke=0)
-
-    # ── 2. Döndürülmüş order bilgisi ────────────────────────────────────────
-    # ty = portrait alt kenar (= landscape sol kenar, sabit tüm satırlarda)
-    ty = MARGIN
-    # tx başlangıcı = portrait sağ kenar (= landscape alt kenar = "sol alt köşe")
-    tx_start = page_w - MARGIN
-
-    local_y = 0  # portrait x'ten çıkarılacak; arttıkça landscape'de yukarı çıkar
-
-    for etype, text in entries:
-        tx = tx_start - local_y
-        if tx < MARGIN:   # sayfanın sol kenarını aşma
-            break
-
-        c.saveState()
-        c.translate(tx, ty)
-        c.rotate(90)      # CCW; sonuç: local x = portrait y yönü (yukarı)
-
-        if etype == "title":
-            c.setFont("Helvetica-Bold", TITLE_SIZE)
-            c.setFillColorRGB(0.08, 0.30, 0.65)
-            c.drawString(0, 0, text)
-            local_y += TITLE_H
-        elif etype == "bold":
-            c.setFont("Helvetica-Bold", FONT_SIZE)
-            c.setFillColorRGB(0, 0, 0)
-            c.drawString(0, 0, text)
-            local_y += LINE_H
-        elif etype == "normal":
-            c.setFont("Helvetica", FONT_SIZE)
-            c.setFillColorRGB(0.15, 0.15, 0.15)
-            c.drawString(0, 0, text)
-            local_y += LINE_H
-        elif etype == "gap":
-            local_y += 5
-
-        c.restoreState()
-
-    c.save()
-    buf.seek(0)
+    upright.save(buf, format="PNG")
     return buf.getvalue()
 
 
-def build_etsy_overlay_pdf(
+def build_etsy_batch_pdf(
     oid_source_map: dict[str, tuple[bytes, int]],
     oid_to_items: dict[str, list[dict]],
 ) -> bytes:
     """
-    Eşleşen her Etsy siparişi için orijinal label sayfasını alır,
-    boş alt alana order bilgisi overlay'ler, tek çok sayfalı PDF döner.
+    Her Etsy siparişi için A4 landscape sayfa üretir.
+    Sol: ORDER bilgisi (düz metin, rotasyon yok).
+    Sağ: Kırpılmış + 90° CW döndürülmüş dik USPS label.
 
     oid_source_map: {order_id: (pdf_bytes, page_index)}
     oid_to_items:   {order_id: [item_dict, ...]}
     """
-    from pypdf import PdfReader, PdfWriter
-    from copy import deepcopy
+    PERSONA_KEYS = [
+        ("name",    "NAME"),    ("name2",   "NAME 2"),  ("name3",  "NAME 3"),
+        ("name4",   "NAME 4"),  ("name5",   "NAME 5"),  ("name6",  "NAME 6"),
+        ("name7",   "NAME 7"),  ("name8",   "NAME 8"),  ("name9",  "NAME 9"),
+        ("name10",  "NAME 10"), ("year",    "YEAR"),    ("message","MESSAGE"),
+        ("gift_box","GIFT BOX"),
+    ]
 
-    writer = PdfWriter()
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=A4L)
+    margin = 12 * mm
 
-    for oid, items in oid_to_items.items():
-        if oid not in oid_source_map:
-            continue
+    items_list = [(oid, items) for oid, items in oid_to_items.items()
+                  if oid in oid_source_map]
+
+    for page_num, (oid, items) in enumerate(items_list):
         pdf_bytes, page_idx = oid_source_map[oid]
 
-        reader = PdfReader(io.BytesIO(pdf_bytes))
-        if page_idx >= len(reader.pages):
-            continue
+        # ── Sol yarı: ORDER bilgisi ──────────────────────────────────────────
+        x = margin
+        y = PAGE_H - 16 * mm
 
-        label_page = deepcopy(reader.pages[page_idx])
-        page_w = float(label_page.mediabox.width)
-        page_h = float(label_page.mediabox.height)
+        c.setFont("Helvetica-Bold", 16)
+        c.setFillColorRGB(0.08, 0.30, 0.65)
+        c.drawString(x, y, "ORDER")
+        y -= 10 * mm
 
-        overlay_bytes = _make_etsy_order_overlay(oid, items, page_w, page_h)
-        overlay_reader = PdfReader(io.BytesIO(overlay_bytes))
-        label_page.merge_page(overlay_reader.pages[0])
-        writer.add_page(label_page)
+        c.setStrokeColorRGB(0.08, 0.30, 0.65)
+        c.setLineWidth(0.8)
+        c.line(x, y + 2 * mm, HALF_W - margin, y + 2 * mm)
+        y -= 6 * mm
 
-    out = io.BytesIO()
-    writer.write(out)
-    out.seek(0)
-    return out.getvalue()
+        c.setFont("Helvetica-Bold", 11)
+        c.setFillColorRGB(0, 0, 0)
+        c.drawString(x, y, f"Order ID:  {oid}")
+        y -= 8 * mm
+
+        for item_idx, item in enumerate(items):
+            if y < 15 * mm:
+                break
+
+            sku = item.get("sku") or "—"
+            c.setFont("Helvetica-Bold", 10)
+            c.setFillColorRGB(0, 0, 0)
+            c.drawString(x, y, f"SKU:  {sku}")
+            y -= 7 * mm
+
+            persona_fields = [(k, lbl) for k, lbl in PERSONA_KEYS if item.get(k)]
+            for suffix, slabel in (("_male", "M"), ("_female", "F")):
+                for i in range(1, 11):
+                    k = f"name{'' if i == 1 else i}{suffix}"
+                    if item.get(k):
+                        persona_fields.append((k, f"NAME ({slabel}{'' if i == 1 else i})"))
+
+            if persona_fields:
+                c.setFont("Helvetica-Bold", 9)
+                c.setFillColorRGB(0, 0, 0)
+                c.drawString(x, y, "Personalization")
+                y -= 1 * mm
+                c.setStrokeColorRGB(0.6, 0.6, 0.6)
+                c.setLineWidth(0.4)
+                c.line(x, y, HALF_W - margin, y)
+                y -= 5.5 * mm
+
+                lbl_x = x + 3 * mm
+                val_x = x + 30 * mm
+
+                for key, label in persona_fields:
+                    if y < 12 * mm:
+                        break
+                    c.setFont("Helvetica-Bold", 9)
+                    c.setFillColorRGB(0, 0, 0)
+                    c.drawString(lbl_x, y, f"{label}:")
+                    c.setFont("Helvetica", 9)
+                    c.setFillColorRGB(0.1, 0.1, 0.1)
+                    c.drawString(val_x, y, str(item.get(key, ""))[:50])
+                    y -= 5.5 * mm
+
+            if item_idx < len(items) - 1:
+                y -= 3 * mm
+
+        # ── Orta çizgi ──────────────────────────────────────────────────────
+        c.setStrokeColorRGB(0.82, 0.82, 0.82)
+        c.setLineWidth(0.5)
+        c.line(HALF_W, 5 * mm, HALF_W, PAGE_H - 5 * mm)
+
+        # ── Sağ yarı: dik Etsy USPS label ───────────────────────────────────
+        label_png = _render_etsy_label_upright(pdf_bytes, page_idx)
+        if label_png:
+            try:
+                img = ImageReader(io.BytesIO(label_png))
+                iw, ih = img.getSize()
+                avail_w = HALF_W - 2 * margin
+                avail_h = PAGE_H - 2 * margin
+                scale = min(avail_w / iw, avail_h / ih)
+                dw, dh = iw * scale, ih * scale
+                ix = HALF_W + (HALF_W - dw) / 2
+                iy = (PAGE_H - dh) / 2
+                c.drawImage(img, ix, iy, width=dw, height=dh, preserveAspectRatio=True)
+            except Exception as exc:
+                c.setFont("Helvetica", 9)
+                c.setFillColorRGB(0.5, 0.5, 0.5)
+                c.drawString(HALF_W + margin, PAGE_H / 2, f"Label yuklenemedi: {exc}")
+        else:
+            c.setFont("Helvetica", 9)
+            c.setFillColorRGB(0.5, 0.5, 0.5)
+            c.drawString(HALF_W + margin, PAGE_H / 2, "Label bulunamadi")
+
+        if page_num < len(items_list) - 1:
+            c.showPage()
+
+    c.save()
+    buf.seek(0)
+    return buf.getvalue()
 
 
 def split_label_pdf(pdf_bytes: bytes) -> tuple[list[bytes], list[str]]:
