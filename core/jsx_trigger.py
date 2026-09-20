@@ -72,6 +72,10 @@ _FONT_MAP: dict[str, str] = {
     "chewy":              "Chewy Regular",
     "cormorant garamond": "Cormorant Garamond Regular",
     "josephsophia":       "josephsophia",
+    "playfairdisplay":    "PlayfairDisplay-Regular",
+    "playfair display":   "PlayfairDisplay-Regular",
+    "all star resort":    "All Star Resort",
+    "grinched":           "GrinchedRegular",
 }
 
 
