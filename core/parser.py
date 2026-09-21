@@ -117,6 +117,7 @@ class AmazonParser:
 
     def _extract_ship_address(self, block: str) -> tuple[str, str]:
         """myo-order-details-buyer-address span'inden isim + adres satırlarını çeker."""
+        import html as _html
         m = re.search(r'myo-order-details-buyer-address[^>]*>(.*?)</div>', block, re.DOTALL | re.IGNORECASE)
         if not m:
             return "", ""
@@ -124,7 +125,7 @@ class AmazonParser:
         raw = re.sub(r'<br\s*/?>', '\n', m.group(1), flags=re.IGNORECASE)
         raw = re.sub(r'<[^>]+>', ' ', raw)
         # Satırları temizle, boşları at
-        lines = [re.sub(r'\s+', ' ', l).strip() for l in raw.splitlines()]
+        lines = [_html.unescape(re.sub(r'\s+', ' ', l).strip()) for l in raw.splitlines()]
         lines = [l for l in lines if l]
         if not lines:
             return "", ""
@@ -204,11 +205,12 @@ class AmazonParser:
 
     def _extract_html_customizations(self, block: str) -> dict:
         """Tüm NAME varyantlarını (NAME, NAME (DAD), NAME (MOM) vb.) sırayla çeker."""
+        import html as _html
 
         # Tüm NAME varyantlarını pozisyon sırasıyla çek
         name_pattern = r'<span[^>]*>\s*(NAME[^<:]*?):\s*</span>\s*<span>\s*([^<]+?)\s*</span>'
         name_matches = re.findall(name_pattern, block, re.IGNORECASE | re.DOTALL)
-        names = [re.sub(r'\s+', ' ', v.strip()) for _, v in name_matches]
+        names = [_html.unescape(re.sub(r'\s+', ' ', v.strip())) for _, v in name_matches]
 
         # YEAR, MESSAGE, Font, Color — tek değer
         def _single(field):
@@ -216,7 +218,7 @@ class AmazonParser:
                 rf'<span[^>]*>\s*{re.escape(field)}:\s*</span>\s*<span>\s*([^<]+?)\s*</span>',
                 block, re.IGNORECASE | re.DOTALL
             )
-            return re.sub(r'\s+', ' ', m.group(1).strip()) if m else ""
+            return _html.unescape(re.sub(r'\s+', ' ', m.group(1).strip())) if m else ""
 
         gift_raw = _single("GIFT BOX")
 
