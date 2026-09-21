@@ -83,6 +83,12 @@ def _parse_labels_etsy(uploaded_pdfs) -> tuple[dict[str, int], dict[str, bytes],
     return oid_to_page, oid_to_pdf, warnings
 
 
+# Partner başına varsayılan font — yalnızca packing slip'te #FONT tag'i yoksa uygulanır
+_PARTNER_DEFAULT_FONTS: dict[str, str] = {
+    "thegiftytrove": "DANCING_SCRIPT",
+}
+
+
 def render_partner_upload(sc) -> None:
     st.markdown("""
     <div style="display:flex; align-items:center; gap:0.6rem; margin-bottom:1.2rem;">
@@ -209,11 +215,14 @@ def render_partner_upload(sc) -> None:
 
         # ── Adım 4a: Queue'ya Ekle ───────────────────────────────────────────
         orders_to_queue = []
+        partner_default_font = _PARTNER_DEFAULT_FONTS.get(selected_id.lower())
         for oid in matched_oids:
             for o in orders_by_oid[oid]:
                 o_copy = dict(o)
                 o_copy["source"] = selected_id
                 o_copy.setdefault("platform", platform_key)
+                if partner_default_font and not o_copy.get("font_option"):
+                    o_copy["font_option"] = partner_default_font
                 orders_to_queue.append(o_copy)
 
         with st.spinner("Ana kuyruğa ekleniyor..."):
