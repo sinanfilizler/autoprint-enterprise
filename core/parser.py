@@ -102,7 +102,12 @@ class AmazonParser:
                 except ValueError:
                     order_date = ""
 
-            block_orders = self._parse_html_block(block, order_id, seller_name, order_date)
+            # Shipping address
+            ship_name, ship_address = self._extract_ship_address(block)
+
+            block_orders = self._parse_html_block(
+                block, order_id, seller_name, order_date, ship_name, ship_address
+            )
             if block_orders:
                 orders.extend(block_orders)
             else:
@@ -110,7 +115,24 @@ class AmazonParser:
 
         return orders, warnings
 
-    def _parse_html_block(self, block: str, order_id: str, seller_name: str = "", order_date: str = "") -> list[dict]:
+    def _extract_ship_address(self, block: str) -> tuple[str, str]:
+        """myo-order-details-buyer-address span'inden isim + adres satırlarını çeker."""
+        m = re.search(r'myo-order-details-buyer-address[^>]*>(.*?)</div>', block, re.DOTALL | re.IGNORECASE)
+        if not m:
+            return "", ""
+        # <br> → newline, diğer tüm tagları boşluğa çevir
+        raw = re.sub(r'<br\s*/?>', '\n', m.group(1), flags=re.IGNORECASE)
+        raw = re.sub(r'<[^>]+>', ' ', raw)
+        # Satırları temizle, boşları at
+        lines = [re.sub(r'\s+', ' ', l).strip() for l in raw.splitlines()]
+        lines = [l for l in lines if l]
+        if not lines:
+            return "", ""
+        ship_name = lines[0]
+        ship_address = ' '.join(lines[1:])
+        return ship_name, ship_address
+
+    def _parse_html_block(self, block: str, order_id: str, seller_name: str = "", order_date: str = "", ship_name: str = "", ship_address: str = "") -> list[dict]:
         """Bir order bloğundaki tüm item'ları parse eder. Her SKU için ayrı dict döner."""
         sku_pattern = r'SKU:\s*</span>\s*<span>\s*([^<]+?)\s*</span>'
         sku_matches = list(re.finditer(sku_pattern, block))
@@ -174,6 +196,8 @@ class AmazonParser:
             custom["seller_name"] = seller_name
             custom["order_date"] = order_date
 
+            custom["ship_name"] = ship_name
+            custom["ship_address"] = ship_address
             orders.append(self._build_order_dict(order_id, order_item_id, sku, qty, custom))
 
         return orders
@@ -357,6 +381,8 @@ class AmazonParser:
             "shipping_fee": float(custom.get("shipping_fee", 0.0)),
             "seller_name":  custom.get("seller_name", ""),
             "order_date":   custom.get("order_date", ""),
+            "ship_name":    custom.get("ship_name", ""),
+            "ship_address": custom.get("ship_address", ""),
             "is_manual":    False,
         }
 

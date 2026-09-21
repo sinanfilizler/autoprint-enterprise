@@ -252,34 +252,31 @@ def render_partner_upload(sc) -> None:
                         {oid: orders_by_oid[oid] for oid in matched_oids},
                     )
                 else:
-                    # Amazon: A4 landscape, sol=order bilgisi, sağ=label PNG
+                    # Amazon: A4 landscape, sol=müşteri/sipariş bilgisi, sağ=label PNG
                     from core.label_merger import build_partner_batch_pdf
+                    _PERSONA_KEYS = [
+                        "name","name2","name3","name4","name5",
+                        "name6","name7","name8","name9","name10",
+                        "year","message","gift_box",
+                    ]
                     pdf_items = []
                     for oid in sorted(matched_oids):
                         oid_orders = orders_by_oid[oid]
-                        skus = list({o.get("sku", "") for o in oid_orders if o.get("sku")})
-                        item_ids = [str(o.get("order_item_id", "")) for o in oid_orders]
-                        summary_lines = []
+                        first = oid_orders[0]
+                        items_data = []
                         for o in oid_orders:
-                            qty = o.get("qty", 1)
-                            summary_lines.append(f"QTY: {qty}")
-                            names = [o.get(k, "") for k in ["name", "name2", "name3"] if o.get(k)]
-                            if names:
-                                summary_lines.append(f"Name: {', '.join(names)}")
-                            if o.get("year"):
-                                summary_lines.append(f"Year: {o['year']}")
-                            if o.get("message"):
-                                summary_lines.append(f"Message: {o['message']}")
-                            if o.get("font_option"):
-                                summary_lines.append(f"Font: {o['font_option']}")
-                            if o.get("color_option"):
-                                summary_lines.append(f"Color: {o['color_option']}")
+                            persona = {k: o[k] for k in _PERSONA_KEYS if o.get(k)}
+                            items_data.append({
+                                "sku": o.get("sku", ""),
+                                "qty": o.get("qty", 1),
+                                "persona": persona,
+                            })
                         pdf_items.append({
-                            "order_id":       oid,
-                            "order_item_ids": item_ids,
-                            "skus":           skus,
-                            "summary":        "\n".join(summary_lines),
-                            "label_png":      label_map.get(oid),
+                            "order_id":    oid,
+                            "ship_name":   first.get("ship_name", ""),
+                            "ship_address": first.get("ship_address", ""),
+                            "items":       items_data,
+                            "label_png":   label_map.get(oid),
                         })
                     pdf_bytes = build_partner_batch_pdf(pdf_items)
 

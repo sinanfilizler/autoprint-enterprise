@@ -271,65 +271,98 @@ def split_label_pdf(pdf_bytes: bytes) -> tuple[list[bytes], list[str]]:
 def build_partner_batch_pdf(matched: list[dict]) -> bytes:
     """
     Her eşleşen sipariş için bir A4 landscape sayfa oluşturur.
-    matched: [{"order_id", "order_item_ids": [str], "skus": [str],
-               "summary": str, "label_png": bytes|None}, ...]
-    Returns: çok sayfalı PDF bytes.
+    matched: [{
+        "order_id": str,
+        "ship_name": str,
+        "ship_address": str,
+        "items": [{"sku": str, "qty": int, "persona": {key: val}}, ...],
+        "label_png": bytes|None
+    }, ...]
+
+    Sol yarı: müşteri adı/adresi → order ID → her item için SKU (Qty-N) + personalizasyon
+    Sağ yarı: shipping label PNG
     """
+    _PERSONA_LABELS = {
+        "name": "Name", "name2": "Name 2", "name3": "Name 3",
+        "name4": "Name 4", "name5": "Name 5", "name6": "Name 6",
+        "name7": "Name 7", "name8": "Name 8", "name9": "Name 9",
+        "name10": "Name 10", "year": "Year", "message": "Message",
+        "gift_box": "Gift Box",
+    }
+
     buf = io.BytesIO()
     c = canvas.Canvas(buf, pagesize=A4L)
     margin = 12 * mm
 
     for page_num, item in enumerate(matched):
         x = margin
-        y = PAGE_H - 16 * mm
+        y = PAGE_H - 14 * mm
 
         # ── Sol yarı ────────────────────────────────────────────────────────
-        c.setFont("Helvetica-Bold", 14)
-        c.setFillColorRGB(0.1, 0.35, 0.7)
-        c.drawString(x, y, "PARTNER ORDER")
-        y -= 10 * mm
 
-        c.setStrokeColorRGB(0.1, 0.35, 0.7)
-        c.setLineWidth(0.8)
-        c.line(x, y + 2 * mm, HALF_W - margin, y + 2 * mm)
-        y -= 6 * mm
+        # Müşteri adı
+        ship_name = item.get("ship_name", "")
+        if ship_name:
+            c.setFont("Helvetica-Bold", 13)
+            c.setFillColorRGB(0, 0, 0)
+            c.drawString(x, y, ship_name)
+            y -= 7 * mm
 
-        c.setFillColorRGB(0, 0, 0)
-        c.setFont("Helvetica-Bold", 11)
+        # Müşteri adresi
+        ship_address = item.get("ship_address", "")
+        if ship_address:
+            c.setFont("Helvetica", 9)
+            c.setFillColorRGB(0.3, 0.3, 0.3)
+            c.drawString(x, y, ship_address[:70])
+            y -= 6 * mm
+
+        # Order ID
+        c.setFont("Helvetica-Bold", 10)
+        c.setFillColorRGB(0.08, 0.30, 0.65)
         c.drawString(x, y, f"Order ID: {item.get('order_id', '—')}")
-        y -= 8 * mm
+        y -= 5 * mm
 
-        skus = item.get("skus", [])
-        c.setFont("Helvetica", 10)
-        c.drawString(x, y, f"SKU: {', '.join(skus) or '—'}")
+        # Ayraç
+        c.setStrokeColorRGB(0.08, 0.30, 0.65)
+        c.setLineWidth(0.7)
+        c.line(x, y, HALF_W - margin, y)
         y -= 7 * mm
 
-        for iid in item.get("order_item_ids", [])[:5]:
-            c.setFont("Helvetica-Oblique", 8)
-            c.setFillColorRGB(0.4, 0.4, 0.4)
-            c.drawString(x + 2 * mm, y, f"Item: {iid}")
-            y -= 5 * mm
+        # Her item: SKU (Qty-N) + personalizasyon
+        items = item.get("items", [])
+        for item_idx, it in enumerate(items):
+            if y < 12 * mm:
+                break
 
-        summary = item.get("summary", "")
-        if summary:
-            y -= 3 * mm
-            c.setFont("Helvetica-Bold", 9)
+            sku = it.get("sku", "—")
+            qty = it.get("qty", 1)
+
+            c.setFont("Helvetica-Bold", 11)
             c.setFillColorRGB(0, 0, 0)
-            c.drawString(x, y, "Personalization:")
-            y -= 5 * mm
-            c.setFont("Helvetica", 9)
-            for line in summary.splitlines()[:12]:
-                if y < 15 * mm:
+            c.drawString(x, y, f"{sku}  (Qty-{qty})")
+            y -= 6 * mm
+
+            persona = it.get("persona", {})
+            for key, label in _PERSONA_LABELS.items():
+                val = persona.get(key)
+                if not val:
+                    continue
+                if y < 10 * mm:
                     break
-                c.drawString(x + 3 * mm, y, line[:60])
+                c.setFont("Helvetica", 9)
+                c.setFillColorRGB(0.15, 0.15, 0.15)
+                c.drawString(x + 4 * mm, y, f"{label}: {str(val)[:55]}")
                 y -= 5 * mm
+
+            if item_idx < len(items) - 1:
+                y -= 3 * mm
 
         # ── Orta çizgi ──────────────────────────────────────────────────────
         c.setStrokeColorRGB(0.82, 0.82, 0.82)
         c.setLineWidth(0.5)
         c.line(HALF_W, 5 * mm, HALF_W, PAGE_H - 5 * mm)
 
-        # ── Sağ yarı (label) ─────────────────────────────────────────────────
+        # ── Sağ yarı: shipping label ─────────────────────────────────────────
         label_png = item.get("label_png")
         if label_png:
             try:
@@ -345,7 +378,7 @@ def build_partner_batch_pdf(matched: list[dict]) -> bytes:
             except Exception as exc:
                 c.setFont("Helvetica", 9)
                 c.setFillColorRGB(0.5, 0.5, 0.5)
-                c.drawString(HALF_W + margin, PAGE_H / 2, f"Gorsel yuklenemedi: {exc}")
+                c.drawString(HALF_W + margin, PAGE_H / 2, f"Label yuklenemedi: {exc}")
         else:
             c.setFont("Helvetica", 9)
             c.setFillColorRGB(0.5, 0.5, 0.5)
