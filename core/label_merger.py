@@ -127,9 +127,10 @@ def build_etsy_batch_pdf(
                 break
 
             sku = item.get("sku") or "—"
+            qty = item.get("qty", 1)
             c.setFont("Helvetica-Bold", 10)
             c.setFillColorRGB(0, 0, 0)
-            c.drawString(x, y, f"SKU:  {sku}")
+            c.drawString(x, y, f"SKU:  {sku}    QTY:  {qty}")
             y -= 7 * mm
 
             persona_fields = [(k, lbl) for k, lbl in PERSONA_KEYS if item.get(k)]
@@ -285,7 +286,7 @@ def build_partner_batch_pdf(matched: list[dict]) -> bytes:
         # ── Sol yarı ────────────────────────────────────────────────────────
         c.setFont("Helvetica-Bold", 14)
         c.setFillColorRGB(0.1, 0.35, 0.7)
-        c.drawString(x, y, "PARTNER SİPARİŞ")
+        c.drawString(x, y, "PARTNER ORDER")
         y -= 10 * mm
 
         c.setStrokeColorRGB(0.1, 0.35, 0.7)

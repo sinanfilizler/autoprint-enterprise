@@ -261,17 +261,19 @@ def render_partner_upload(sc) -> None:
                         item_ids = [str(o.get("order_item_id", "")) for o in oid_orders]
                         summary_lines = []
                         for o in oid_orders:
+                            qty = o.get("qty", 1)
+                            summary_lines.append(f"QTY: {qty}")
                             names = [o.get(k, "") for k in ["name", "name2", "name3"] if o.get(k)]
                             if names:
-                                summary_lines.append(f"İsim: {', '.join(names)}")
+                                summary_lines.append(f"Name: {', '.join(names)}")
                             if o.get("year"):
-                                summary_lines.append(f"Yıl: {o['year']}")
+                                summary_lines.append(f"Year: {o['year']}")
                             if o.get("message"):
-                                summary_lines.append(f"Mesaj: {o['message']}")
+                                summary_lines.append(f"Message: {o['message']}")
                             if o.get("font_option"):
                                 summary_lines.append(f"Font: {o['font_option']}")
                             if o.get("color_option"):
-                                summary_lines.append(f"Renk: {o['color_option']}")
+                                summary_lines.append(f"Color: {o['color_option']}")
                         pdf_items.append({
                             "order_id":       oid,
                             "order_item_ids": item_ids,
