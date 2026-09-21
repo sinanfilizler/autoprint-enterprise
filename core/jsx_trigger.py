@@ -77,6 +77,7 @@ _FONT_MAP: dict[str, str] = {
     "all star resort":    "All Star Resort",
     "allstar":            "All Star Resort",
     "grinched":           "GrinchedRegular",
+    "allura":             "Allura-Regular",
 }
 
 
