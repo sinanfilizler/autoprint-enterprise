@@ -11,10 +11,10 @@ Private notes formatı (Etsy private-notes alanında seller tarafından):
   #VALUE2
   ...
 
-Her değer de # ile başladığı için klasik satır bazlı ayrım çalışmaz.
-Çözüm: re.findall(r'#(\\S+)') ile tüm token'lar çıkarılır; SKU ile
-başlayan her section'da çift-tek (alternating) pozisyon kullanılır:
-  0=KEY, 1=VALUE, 2=KEY, 3=VALUE …
+Her değer de # ile başladığı için text '#' işaretine göre bölünür;
+her segment ilk satırından okunur (boşluk içeren değerler korunur):
+  #Mike & Rachel → "Mike & Rachel" tam olarak alınır.
+Çift-tek (alternating) pozisyon: 0=KEY, 1=VALUE, 2=KEY, 3=VALUE …
 
 Bu sayede DOG_NAME, ANIMAL gibi özel field'lar da otomatik yakalanır;
 known-tags listesi gerekmez.
@@ -122,15 +122,21 @@ class EtsyParser:
 
     def _extract_note_tokens(self, block: str) -> list[str]:
         """
-        Private notes bölümünden sonraki tüm #WORD token'larını çıkarır.
-        pdfplumber'ın iki sütunu karıştırmasından doğan 'Packaging ...'
-        gibi gürültü görmezden gelinir — sadece # ile başlayan tokenlar alınır.
+        Private notes bölümündeki #KEY / #VALUE çiftlerini çıkarır.
+        Her '#' işareti yeni bir token başlatır; token değeri boşluk içerebilir
+        (örn. #Mike & Rachel). pdfplumber sütun karışmasından gelen gürültü
+        genellikle ayrı satırlarda gelir — her segmentten sadece ilk satır alınır.
         """
         m = re.search(r'Private notes?\s*(.*)', block, re.IGNORECASE | re.DOTALL)
         if not m:
             return []
         notes_text = m.group(1)
-        return re.findall(r'#(\S+)', notes_text)
+        tokens = []
+        for seg in notes_text.split('#'):
+            lines = [l.strip() for l in seg.splitlines() if l.strip()]
+            if lines:
+                tokens.append(lines[0])
+        return tokens
 
     # ── Token section parse ───────────────────────────────────────────────────
 
