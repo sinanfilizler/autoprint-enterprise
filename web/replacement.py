@@ -93,6 +93,26 @@ def _build_a4(sku: str, rtype: str, p_json: str, created: str, pdf_bytes: bytes 
     return build_a4_pdf(sku, rtype, items, created, png)
 
 
+# Font seçenekleri: display adı → font_option kodu
+_FONT_OPTIONS: dict[str, str] = {
+    "Monotype Corsiva (Serif)": "SERIF",
+    "Welcome Christmas":        "WELCOME",
+    "Dancing Script":           "DANCING_SCRIPT",
+    "Cookie":                   "cookie",
+    "Chewy":                    "chewy",
+    "Cormorant Garamond":       "cormorant garamond",
+    "Joseph Sophia":            "josephsophia",
+    "Playfair Display":         "playfair display",
+    "All Star Resort":          "all star resort",
+    "Grinched":                 "grinched",
+    "Allura":                   "allura",
+    "Bad Script":               "bad script",
+    "Great Vibes":              "great vibes",
+}
+
+_COLOR_OPTIONS = ["BLACK", "WHITE", "IVORY", "RED", "GOLD", "SILVER"]
+
+
 # ── Bölüm 1: Add Replacement ─────────────────────────────────────────────────
 
 def _render_add(sc) -> None:
@@ -140,11 +160,23 @@ def _render_add(sc) -> None:
         height=130,
         key=f"repl_new_persona_{v}",
     )
+    col_font, col_color = st.columns(2)
+    with col_font:
+        new_font_label = st.selectbox(
+            "Font", list(_FONT_OPTIONS.keys()), key=f"repl_new_font_{v}"
+        )
+    with col_color:
+        new_color = st.selectbox(
+            "Renk", _COLOR_OPTIONS, key=f"repl_new_color_{v}"
+        )
     if st.button("➕ Ürün Ekle", key=f"repl_add_item_{v}"):
         if new_sku.strip():
-            st.session_state["repl_items"].append(
-                {"sku": new_sku.strip(), "personalization": new_persona.strip()}
-            )
+            st.session_state["repl_items"].append({
+                "sku":          new_sku.strip(),
+                "personalization": new_persona.strip(),
+                "font_option":  _FONT_OPTIONS[new_font_label],
+                "color_option": new_color,
+            })
             st.session_state["repl_item_v"] += 1
             st.rerun()
         else:
@@ -324,7 +356,8 @@ def _render_pending(sc) -> None:
                     st.rerun()
 
 
-def _persona_to_order(rid: str, item_sku: str, persona: dict, idx: int = 0) -> dict:
+def _persona_to_order(rid: str, item_sku: str, persona: dict, idx: int = 0,
+                       font_option: str = "SERIF", color_option: str = "BLACK") -> dict:
     order: dict = {
         "order_id":      f"REPL-{rid[:8]}",
         "order_item_id": f"REPL-{rid}-{idx}",
@@ -333,8 +366,8 @@ def _persona_to_order(rid: str, item_sku: str, persona: dict, idx: int = 0) -> d
         "name":          persona.get("NAME", persona.get("NAME_1", "")),
         "year":          persona.get("YEAR", ""),
         "message":       persona.get("MESSAGE", ""),
-        "font_option":   "SERIF",
-        "color_option":  "BLACK",
+        "font_option":   font_option,
+        "color_option":  color_option,
         "is_manual":     True,
     }
     for pkey, n in [("NAME_DAD", 2), ("NAME_2", 3), ("NAME_3", 4)]:
@@ -363,7 +396,14 @@ def _action_queue(sc, item: dict) -> None:
 
     orders = []
     for idx, it in enumerate(items_list):
-        orders.append(_persona_to_order(rid, it.get("sku", ""), it.get("personalization", {}), idx))
+        orders.append(_persona_to_order(
+            rid,
+            it.get("sku", ""),
+            it.get("personalization", {}),
+            idx,
+            font_option=it.get("font_option", "SERIF"),
+            color_option=it.get("color_option", "BLACK"),
+        ))
 
     try:
         OrderManager().add_orders(orders)
