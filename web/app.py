@@ -1014,6 +1014,59 @@ with tab_admin:
     else:
         st.error("Bağlantı yok.")
 
+    # ── SKU İsimleri ──────────────────────────────────────────────────────────
+    st.divider()
+    st.write("### SKU İsimleri")
+    if sc:
+        try:
+            partners = sc.get_partners()
+        except Exception:
+            partners = []
+
+        if partners:
+            partner_opts = {p["partner_name"]: p["partner_id"] for p in partners}
+            sel_pname = st.selectbox("Partner", list(partner_opts.keys()), key="sku_names_partner")
+            sel_pid   = partner_opts[sel_pname]
+
+            # Mevcut isimler
+            try:
+                all_names = sc.get_sku_names(sel_pid)
+                pid_names = all_names.get(sel_pid.lower(), {})
+            except Exception:
+                pid_names = {}
+
+            if pid_names:
+                rows = [{"SKU": k, "Ürün Adı": v} for k, v in sorted(pid_names.items())]
+                st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+            else:
+                st.info("Bu partner için henüz SKU ismi tanımlı değil.")
+
+            # Ekle / Güncelle
+            with st.form("sku_name_add_form"):
+                sc1, sc2 = st.columns(2)
+                new_sku_key  = sc1.text_input("SKU", placeholder="CRMC1246")
+                new_sku_name = sc2.text_input("Ürün Adı", placeholder="Round Ceramic Ornament")
+                if st.form_submit_button("Ekle / Güncelle"):
+                    if new_sku_key.strip() and new_sku_name.strip():
+                        sc.upsert_sku_name(sel_pid, new_sku_key.strip(), new_sku_name.strip())
+                        st.success(f"{new_sku_key.strip().upper()} → {new_sku_name.strip()}")
+                        st.rerun()
+                    else:
+                        st.error("SKU ve Ürün Adı zorunludur.")
+
+            # Sil
+            if pid_names:
+                del_sku = st.selectbox("Sil", ["—"] + sorted(pid_names.keys()), key="sku_del_sel")
+                if st.button("Sil", type="secondary", key="btn_del_sku_name"):
+                    if del_sku != "—":
+                        sc.delete_sku_name(sel_pid, del_sku)
+                        st.success(f"{del_sku} silindi.")
+                        st.rerun()
+        else:
+            st.info("Önce partner ekleyin.")
+    else:
+        st.error("Bağlantı yok.")
+
     # Tehlikeli işlemler
     st.divider()
     st.write("### Tehlikeli İşlemler")

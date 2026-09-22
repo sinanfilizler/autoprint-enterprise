@@ -76,6 +76,7 @@ def _render_etsy_label_upright(pdf_bytes: bytes, page_idx: int) -> bytes | None:
 def build_etsy_batch_pdf(
     oid_source_map: dict[str, tuple[bytes, int]],
     oid_to_items: dict[str, list[dict]],
+    sku_names: dict[str, str] | None = None,
 ) -> bytes:
     """
     Her Etsy siparişi için A4 landscape sayfa üretir.
@@ -92,6 +93,8 @@ def build_etsy_batch_pdf(
         ("name10",  "NAME 10"), ("year",    "YEAR"),    ("message","MESSAGE"),
         ("gift_box","GIFT BOX"),
     ]
+
+    sku_names = {k.upper(): v for k, v in (sku_names or {}).items()}
 
     buf = io.BytesIO()
     c = canvas.Canvas(buf, pagesize=A4L)
@@ -131,7 +134,16 @@ def build_etsy_batch_pdf(
             c.setFont("Helvetica-Bold", 10)
             c.setFillColorRGB(0, 0, 0)
             c.drawString(x, y, f"SKU:  {sku}    QTY:  {qty}")
-            y -= 7 * mm
+            y -= 6 * mm
+
+            product_name = sku_names.get(sku.upper(), "")
+            if product_name and y >= 15 * mm:
+                c.setFont("Helvetica-Oblique", 9)
+                c.setFillColorRGB(0.35, 0.35, 0.35)
+                c.drawString(x + 2 * mm, y, product_name[:60])
+                y -= 5 * mm
+            else:
+                y -= 1 * mm
 
             persona_fields = [(k, lbl) for k, lbl in PERSONA_KEYS if item.get(k)]
             for suffix, slabel in (("_male", "M"), ("_female", "F")):
@@ -268,7 +280,7 @@ def split_label_pdf(pdf_bytes: bytes) -> tuple[list[bytes], list[str]]:
     return label_pngs, order_ids
 
 
-def build_partner_batch_pdf(matched: list[dict]) -> bytes:
+def build_partner_batch_pdf(matched: list[dict], sku_names: dict[str, str] | None = None) -> bytes:
     """
     Her eşleşen sipariş için bir A4 landscape sayfa oluşturur.
     matched: [{
@@ -278,10 +290,12 @@ def build_partner_batch_pdf(matched: list[dict]) -> bytes:
         "items": [{"sku": str, "qty": int, "persona": {key: val}}, ...],
         "label_png": bytes|None
     }, ...]
+    sku_names: {sku_upper: product_name} — SKU'nun altına ürün adı yazar.
 
     Sol yarı: müşteri adı/adresi → order ID → her item için SKU (Qty-N) + personalizasyon
     Sağ yarı: shipping label PNG
     """
+    sku_names = {k.upper(): v for k, v in (sku_names or {}).items()}
     _PERSONA_LABELS = {
         "name": "Name", "name2": "Name 2", "name3": "Name 3",
         "name4": "Name 4", "name5": "Name 5", "name6": "Name 6",
@@ -341,6 +355,13 @@ def build_partner_batch_pdf(matched: list[dict]) -> bytes:
             c.setFillColorRGB(0, 0, 0)
             c.drawString(x, y, f"{sku}  (Qty-{qty})")
             y -= 6 * mm
+
+            product_name = sku_names.get(sku.upper(), "")
+            if product_name and y >= 10 * mm:
+                c.setFont("Helvetica-Oblique", 9)
+                c.setFillColorRGB(0.35, 0.35, 0.35)
+                c.drawString(x + 2 * mm, y, product_name[:60])
+                y -= 5 * mm
 
             persona = it.get("persona", {})
             for key, label in _PERSONA_LABELS.items():

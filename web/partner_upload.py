@@ -239,6 +239,13 @@ def render_partner_upload(sc) -> None:
         st.markdown("### Yazdırma PDF'i")
         with st.spinner("PDF hazırlanıyor..."):
             try:
+                # SKU isimlerini çek
+                try:
+                    all_sku_names = sc.get_sku_names(selected_id)
+                    sku_names = all_sku_names.get(selected_id.lower(), {})
+                except Exception:
+                    sku_names = {}
+
                 if platform_key == "etsy":
                     # Etsy: kırpılmış + döndürülmüş label + sol metin bloğu (A4 landscape)
                     from core.label_merger import build_etsy_batch_pdf
@@ -250,6 +257,7 @@ def render_partner_upload(sc) -> None:
                     pdf_bytes = build_etsy_batch_pdf(
                         oid_source_map,
                         {oid: orders_by_oid[oid] for oid in matched_oids},
+                        sku_names=sku_names,
                     )
                 else:
                     # Amazon: A4 landscape, sol=müşteri/sipariş bilgisi, sağ=label PNG
@@ -278,7 +286,7 @@ def render_partner_upload(sc) -> None:
                             "items":       items_data,
                             "label_png":   label_map.get(oid),
                         })
-                    pdf_bytes = build_partner_batch_pdf(pdf_items)
+                    pdf_bytes = build_partner_batch_pdf(pdf_items, sku_names=sku_names)
 
                 st.download_button(
                     "⬇️ PDF İndir",

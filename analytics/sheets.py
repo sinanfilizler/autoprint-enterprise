@@ -33,6 +33,8 @@ LOG_SHEET = os.getenv("GOOGLE_SHEETS_LOG_SHEET", "Log")
 COSTS_SHEET = os.getenv("GOOGLE_SHEETS_COSTS_SHEET", "Costs")
 REPLACEMENTS_SHEET = "Replacements"
 REPLACEMENT_LABELS_SHEET = "ReplacementLabels"
+SKU_NAMES_SHEET = "SKUNames"
+SKU_NAMES_COLUMNS = ["partner_id", "sku", "product_name"]
 
 # ── Sütun düzeni ────────────────────────────────────────────────────────────
 QUEUE_COLUMNS = [
@@ -110,6 +112,7 @@ class SheetsClient:
             REPLACEMENT_LABELS_SHEET, REPLACEMENT_LABELS_COLUMNS
         )
         self._partners = self._get_or_create_sheet("Partners", PARTNERS_COLUMNS)
+        self._sku_names = self._get_or_create_sheet(SKU_NAMES_SHEET, SKU_NAMES_COLUMNS)
 
         self._cache: dict = {}  # key → (timestamp, value)
 
@@ -690,6 +693,78 @@ class SheetsClient:
             if (row[pid_col].strip() if pid_col < len(row) else "") == pid:
                 self._partners.update_cell(i, active_col + 1, "FALSE")
                 self._cache.pop("partners", None)
+                return True
+        return False
+
+
+    # ── SKU İsimleri ─────────────────────────────────────────────────────────
+
+    def get_sku_names(self, partner_id: str | None = None) -> dict[str, dict[str, str]]:
+        """
+        {partner_id: {sku: product_name}} döner.
+        partner_id verilirse sadece o partner filtrelenir.
+        Sonuç 5dk cache'lenir.
+        """
+        cache_key = f"sku_names_{partner_id or 'all'}"
+        cached = self._cache.get(cache_key)
+        if cached and time.monotonic() - cached[0] < 300:
+            return cached[1]
+        records = self._sku_names.get_all_records(default_blank="")
+        result: dict[str, dict[str, str]] = {}
+        for r in records:
+            pid = str(r.get("partner_id", "")).strip().lower()
+            sku = str(r.get("sku", "")).strip().upper()
+            name = str(r.get("product_name", "")).strip()
+            if not pid or not sku:
+                continue
+            if partner_id and pid != partner_id.strip().lower():
+                continue
+            result.setdefault(pid, {})[sku] = name
+        self._cache[cache_key] = (time.monotonic(), result)
+        return result
+
+    def upsert_sku_name(self, partner_id: str, sku: str, product_name: str) -> None:
+        """SKU ismi ekler veya günceller."""
+        pid = partner_id.strip().lower()
+        sku = sku.strip().upper()
+        all_rows = self._sku_names.get_all_values()
+        if len(all_rows) > 1:
+            header = all_rows[0]
+            try:
+                pid_col  = header.index("partner_id")
+                sku_col  = header.index("sku")
+                name_col = header.index("product_name")
+            except ValueError:
+                pid_col, sku_col, name_col = 0, 1, 2
+            for i, row in enumerate(all_rows[1:], start=2):
+                row_pid = row[pid_col].strip().lower() if pid_col < len(row) else ""
+                row_sku = row[sku_col].strip().upper() if sku_col < len(row) else ""
+                if row_pid == pid and row_sku == sku:
+                    self._sku_names.update_cell(i, name_col + 1, product_name.strip())
+                    self._cache = {k: v for k, v in self._cache.items() if not k.startswith("sku_names")}
+                    return
+        self._sku_names.append_row([pid, sku, product_name.strip()], value_input_option="RAW")
+        self._cache = {k: v for k, v in self._cache.items() if not k.startswith("sku_names")}
+
+    def delete_sku_name(self, partner_id: str, sku: str) -> bool:
+        """SKU ismini siler. Başarılıysa True döner."""
+        pid = partner_id.strip().lower()
+        sku = sku.strip().upper()
+        all_rows = self._sku_names.get_all_values()
+        if len(all_rows) <= 1:
+            return False
+        header = all_rows[0]
+        try:
+            pid_col = header.index("partner_id")
+            sku_col = header.index("sku")
+        except ValueError:
+            return False
+        for i, row in enumerate(all_rows[1:], start=2):
+            row_pid = row[pid_col].strip().lower() if pid_col < len(row) else ""
+            row_sku = row[sku_col].strip().upper() if sku_col < len(row) else ""
+            if row_pid == pid and row_sku == sku:
+                self._sku_names.delete_rows(i)
+                self._cache = {k: v for k, v in self._cache.items() if not k.startswith("sku_names")}
                 return True
         return False
 
