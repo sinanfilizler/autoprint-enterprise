@@ -35,7 +35,7 @@ def _parse_labels_amazon(uploaded_pdfs) -> tuple[dict[str, bytes | None], list[s
         if not order_ids:
             warnings.append(
                 f"[{pdf_file.name}] Order ID bulunamadı. "
-                "Son sayfa(lar)da 3+ order ID içeren sipariş listesi olmalı."
+                "Son sayfa(lar)da 'List of orders' başlıklı order ID listesi olmalı."
             )
             continue
 

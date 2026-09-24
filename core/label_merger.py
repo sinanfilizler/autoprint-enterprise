@@ -245,24 +245,34 @@ def split_label_pdf(pdf_bytes: bytes) -> tuple[list[bytes], list[str]]:
     if n == 0:
         return [], []
 
+    def _is_list_page(text: str, found: list) -> bool:
+        """Sayfanın order listesi mi yoksa label mi olduğunu belirler."""
+        if len(found) >= 3:
+            return True
+        if len(found) >= 1 and "list of orders" in text.lower():
+            return True
+        return False
+
     # Tek sayfa: eğer order ID listesiyse liste, değilse label
     if n == 1:
         textpage = doc[0].get_textpage()
-        found = _ORDER_ID_RE.findall(textpage.get_text_range())
-        if len(found) >= 3:
+        text = textpage.get_text_range()
+        found = _ORDER_ID_RE.findall(text)
+        if _is_list_page(text, found):
             return [], found
         bitmap = doc[0].render(scale=150 / 72)
         buf = io.BytesIO()
         bitmap.to_pil().save(buf, format="PNG")
         return [buf.getvalue()], []
 
-    # Sondan itibaren, 3+ order ID içeren sayfaları liste sayfası say
+    # Sondan itibaren, order listesi sayfalarını tespit et
     order_ids: list[str] = []
     list_page_count = 0
     for i in range(n - 1, max(n - 6, -1), -1):
         textpage = doc[i].get_textpage()
-        found = _ORDER_ID_RE.findall(textpage.get_text_range())
-        if len(found) >= 3:
+        text = textpage.get_text_range()
+        found = _ORDER_ID_RE.findall(text)
+        if _is_list_page(text, found):
             order_ids = found + order_ids
             list_page_count += 1
         else:
