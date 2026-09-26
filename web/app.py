@@ -691,7 +691,12 @@ with tab_dashboard:
             except ValueError:
                 return True
 
-        filtered_log = [r for r in log_rows if _in_range(r) and not r.get("is_manual")]
+        filtered_log = [
+            r for r in log_rows
+            if _in_range(r)
+            and not r.get("is_manual")
+            and (not r.get("source") or r.get("source") == "internal")
+        ]
 
         # ── Üst metrikler ───────────────────────────────────────────────────
         col1, col2, col3, col4 = st.columns(4)
@@ -882,15 +887,24 @@ with tab_dashboard:
         partner_days = {"Son 7 Gün": 7, "Son 30 Gün": 30}.get(partner_period)
         pstats = get_partner_stats(log_rows, days=partner_days)
 
+        # partner_id → partner_name map
+        try:
+            _pid_to_name = {p["partner_id"].lower(): p["partner_name"] for p in sc.get_partners()}
+        except Exception:
+            _pid_to_name = {}
+
         if pstats:
             partner_rows = []
             for src, stat in sorted(pstats.items(), key=lambda x: -x[1]["orders"]):
-                label = "İç Sipariş" if src == "internal" else src
+                if src == "internal":
+                    label = "İç Sipariş"
+                else:
+                    label = _pid_to_name.get(src.lower(), src)
                 partner_rows.append({
-                    "Partner":          label,
-                    "Sipariş Sayısı":   stat["orders"],
+                    "Partner":            label,
+                    "Sipariş Sayısı":     stat["orders"],
                     "Ürün Adedi (Piece)": stat["items"],
-                    "Gift Box Sayısı":  stat.get("giftboxes", 0),
+                    "Gift Box Sayısı":    stat.get("giftboxes", 0),
                 })
             partner_df = pd.DataFrame(partner_rows)
             st.dataframe(partner_df, use_container_width=True)
