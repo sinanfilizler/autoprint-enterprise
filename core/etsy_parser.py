@@ -89,6 +89,12 @@ class EtsyParser:
         if not tokens:
             return [], ["Private notes bulunamadı — sipariş atlanıyor"]
 
+        # İlk #SKU'dan önceki tokenları at (gürültü / preamble)
+        first_sku = next((i for i, t in enumerate(tokens) if t.upper() == "SKU"), None)
+        if first_sku is None:
+            return [], ["Private notes'ta #SKU bulunamadı"]
+        tokens = tokens[first_sku:]
+
         # "SKU" token'ı görüldükçe yeni item section başlatılır
         sections: list[list[str]] = []
         current: list[str] = []
@@ -101,7 +107,7 @@ class EtsyParser:
             sections.append(current)
 
         if not sections:
-            return [], ["Private notes'ta #SKU bulunamadı"]
+            return [], ["Private notes'ta geçerli #SKU section bulunamadı"]
 
         orders, warnings = [], []
         for item_idx, section in enumerate(sections):
