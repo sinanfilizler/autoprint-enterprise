@@ -168,7 +168,7 @@ class EtsyParser:
         year = ""
         message = ""
         gift_box = ""
-        font_option = "SERIF"
+        font_option = ""
         color_option = "BLACK"
         state = ""
         extra_fields: dict[str, str] = {}
