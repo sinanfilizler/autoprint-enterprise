@@ -61,7 +61,7 @@ JSX font kodları:
 
 ## Renk Sistemi (RGB)
 BLACK: 0,0,0 | WHITE: 240,240,240 | IVORY: 255,255,240
-RED: 180,30,40 | GOLD: 200,160,60 | SILVER: 180,180,180
+RED: 180,30,40 | GOLD: 198,141,37 (#c68d25) | SILVER: 180,180,180
 dog_round ürünlerinde color_option her zaman IVORY
 
 ## Grid ve Sayfa Ayarları
