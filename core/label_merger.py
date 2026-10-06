@@ -318,105 +318,125 @@ def build_partner_batch_pdf(matched: list[dict], sku_names: dict[str, str] | Non
     c = canvas.Canvas(buf, pagesize=A4L)
     margin = 12 * mm
 
-    for page_num, item in enumerate(matched):
-        x = margin
-        y = PAGE_H - 14 * mm
-
-        # ── Sol yarı ────────────────────────────────────────────────────────
-
-        # Müşteri adı
+    for order_idx, item in enumerate(matched):
+        is_last_order = order_idx == len(matched) - 1
         ship_name = item.get("ship_name", "")
-        if ship_name:
-            c.setFont("Helvetica-Bold", 13)
-            c.setFillColorRGB(0, 0, 0)
-            c.drawString(x, y, ship_name)
+        ship_address = item.get("ship_address", "")
+        order_id = item.get("order_id", "—")
+        items = item.get("items", [])
+        label_png = item.get("label_png")
+
+        first_subpage = True
+        item_idx = 0
+
+        while True:
+            x = margin
+            y = PAGE_H - 14 * mm
+
+            # ── Sol yarı: başlık ────────────────────────────────────────────
+            if first_subpage:
+                if ship_name:
+                    c.setFont("Helvetica-Bold", 16)
+                    c.setFillColorRGB(0, 0, 0)
+                    c.drawString(x, y, ship_name)
+                    y -= 8 * mm
+
+                if ship_address:
+                    c.setFont("Helvetica", 11)
+                    c.setFillColorRGB(0.3, 0.3, 0.3)
+                    c.drawString(x, y, ship_address[:70])
+                    y -= 7 * mm
+
+                c.setFont("Helvetica-Bold", 12)
+                c.setFillColorRGB(0.08, 0.30, 0.65)
+                c.drawString(x, y, f"Order ID: {order_id}")
+                y -= 6 * mm
+            else:
+                c.setFont("Helvetica-Bold", 12)
+                c.setFillColorRGB(0.08, 0.30, 0.65)
+                c.drawString(x, y, f"Order ID: {order_id}  (devam)")
+                y -= 6 * mm
+
+            c.setStrokeColorRGB(0.08, 0.30, 0.65)
+            c.setLineWidth(0.7)
+            c.line(x, y, HALF_W - margin, y)
             y -= 7 * mm
 
-        # Müşteri adresi
-        ship_address = item.get("ship_address", "")
-        if ship_address:
-            c.setFont("Helvetica", 9)
-            c.setFillColorRGB(0.3, 0.3, 0.3)
-            c.drawString(x, y, ship_address[:70])
-            y -= 6 * mm
-
-        # Order ID
-        c.setFont("Helvetica-Bold", 10)
-        c.setFillColorRGB(0.08, 0.30, 0.65)
-        c.drawString(x, y, f"Order ID: {item.get('order_id', '—')}")
-        y -= 5 * mm
-
-        # Ayraç
-        c.setStrokeColorRGB(0.08, 0.30, 0.65)
-        c.setLineWidth(0.7)
-        c.line(x, y, HALF_W - margin, y)
-        y -= 7 * mm
-
-        # Her item: SKU (Qty-N) + personalizasyon
-        items = item.get("items", [])
-        for item_idx, it in enumerate(items):
-            if y < 12 * mm:
-                break
-
-            sku = it.get("sku", "—")
-            qty = it.get("qty", 1)
-
-            c.setFont("Helvetica-Bold", 11)
-            c.setFillColorRGB(0, 0, 0)
-            c.drawString(x, y, f"{sku}  (Qty-{qty})")
-            y -= 6 * mm
-
-            product_name = sku_names.get(sku.upper(), "")
-            if product_name and y >= 10 * mm:
-                c.setFont("Helvetica-Oblique", 9)
-                c.setFillColorRGB(0.35, 0.35, 0.35)
-                c.drawString(x + 2 * mm, y, product_name[:60])
-                y -= 5 * mm
-
-            persona = it.get("persona", {})
-            for key, label in _PERSONA_LABELS.items():
-                val = persona.get(key)
-                if not val:
-                    continue
-                if y < 10 * mm:
+            # ── Her item: SKU (Qty-N) + personalizasyon ─────────────────────
+            page_full = False
+            while item_idx < len(items):
+                if y < 14 * mm:
+                    page_full = True
                     break
-                c.setFont("Helvetica", 9)
-                c.setFillColorRGB(0.15, 0.15, 0.15)
-                c.drawString(x + 4 * mm, y, f"{label}: {str(val)[:55]}")
-                y -= 5 * mm
 
-            if item_idx < len(items) - 1:
-                y -= 3 * mm
+                it = items[item_idx]
+                sku = it.get("sku", "—")
+                qty = it.get("qty", 1)
+                product_name = sku_names.get(sku.upper(), "")
 
-        # ── Orta çizgi ──────────────────────────────────────────────────────
-        c.setStrokeColorRGB(0.82, 0.82, 0.82)
-        c.setLineWidth(0.5)
-        c.line(HALF_W, 5 * mm, HALF_W, PAGE_H - 5 * mm)
+                c.setFont("Helvetica-Bold", 14)
+                c.setFillColorRGB(0, 0, 0)
+                line = f"{sku} - (Qty-{qty}) - {product_name}" if product_name else f"{sku} - (Qty-{qty})"
+                c.drawString(x, y, line[:70])
+                y -= 7 * mm
 
-        # ── Sağ yarı: shipping label ─────────────────────────────────────────
-        label_png = item.get("label_png")
-        if label_png:
-            try:
-                img = ImageReader(io.BytesIO(label_png))
-                iw, ih = img.getSize()
-                avail_w = HALF_W - 2 * margin
-                avail_h = PAGE_H - 2 * margin
-                scale = min(avail_w / iw, avail_h / ih)
-                dw, dh = iw * scale, ih * scale
-                ix = HALF_W + (HALF_W - dw) / 2
-                iy = (PAGE_H - dh) / 2
-                c.drawImage(img, ix, iy, width=dw, height=dh, preserveAspectRatio=True)
-            except Exception as exc:
-                c.setFont("Helvetica", 9)
-                c.setFillColorRGB(0.5, 0.5, 0.5)
-                c.drawString(HALF_W + margin, PAGE_H / 2, f"Label yuklenemedi: {exc}")
-        else:
-            c.setFont("Helvetica", 9)
-            c.setFillColorRGB(0.5, 0.5, 0.5)
-            c.drawString(HALF_W + margin, PAGE_H / 2, "Label bulunamadi")
+                persona = it.get("persona", {})
+                for key, label in _PERSONA_LABELS.items():
+                    val = persona.get(key)
+                    if not val:
+                        continue
+                    if y < 10 * mm:
+                        break
+                    c.setFont("Helvetica", 10.5)
+                    c.setFillColorRGB(0.15, 0.15, 0.15)
+                    c.drawString(x + 4 * mm, y, f"{label}: {str(val)[:55]}")
+                    y -= 5.5 * mm
 
-        if page_num < len(matched) - 1:
-            c.showPage()
+                item_idx += 1
+                if item_idx < len(items):
+                    y -= 3 * mm
+
+            # ── Orta çizgi ───────────────────────────────────────────────────
+            c.setStrokeColorRGB(0.82, 0.82, 0.82)
+            c.setLineWidth(0.5)
+            c.line(HALF_W, 5 * mm, HALF_W, PAGE_H - 5 * mm)
+
+            # ── Sağ yarı: shipping label (yalnızca ilk sayfada) ──────────────
+            if first_subpage:
+                if label_png:
+                    try:
+                        img = ImageReader(io.BytesIO(label_png))
+                        iw, ih = img.getSize()
+                        avail_w = HALF_W - 2 * margin
+                        avail_h = PAGE_H - 2 * margin
+                        scale = min(avail_w / iw, avail_h / ih)
+                        dw, dh = iw * scale, ih * scale
+                        ix = HALF_W + (HALF_W - dw) / 2
+                        iy = (PAGE_H - dh) / 2
+                        c.drawImage(img, ix, iy, width=dw, height=dh, preserveAspectRatio=True)
+                    except Exception as exc:
+                        c.setFont("Helvetica", 9)
+                        c.setFillColorRGB(0.5, 0.5, 0.5)
+                        c.drawString(HALF_W + margin, PAGE_H / 2, f"Label yuklenemedi: {exc}")
+                else:
+                    c.setFont("Helvetica", 9)
+                    c.setFillColorRGB(0.5, 0.5, 0.5)
+                    c.drawString(HALF_W + margin, PAGE_H / 2, "Label bulunamadi")
+            else:
+                c.setFont("Helvetica-Oblique", 9)
+                c.setFillColorRGB(0.6, 0.6, 0.6)
+                c.drawString(HALF_W + margin, PAGE_H / 2, "(Shipping label ilk sayfada)")
+
+            if page_full:
+                # Bu siparişin ürün listesi bitmedi — yeni sayfada devam et.
+                c.showPage()
+                first_subpage = False
+                continue
+
+            # Sipariş tamamen yazıldı — son sipariş değilse yeni sayfaya geç.
+            if not is_last_order:
+                c.showPage()
+            break
 
     c.save()
     buf.seek(0)
