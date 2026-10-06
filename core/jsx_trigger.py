@@ -1,5 +1,6 @@
 import os
 import subprocess
+import time
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -31,6 +32,20 @@ COLOR_RGB = {
 }
 
 OSASCRIPT_TIMEOUT = int(os.getenv("OSASCRIPT_TIMEOUT", "3600"))
+
+# AppleEvent'in kendi varsayılan ~120s timeout'u yerine OSASCRIPT_TIMEOUT'u
+# kullanması için lock dosyası. "do javascript" süresi bu değeri aşarsa
+# macOS -1712 (AppleEvent timed out) hatası döner — script Illustrator'da
+# ARKA PLANDA ÇALIŞMAYA DEVAM EDER. Lock, bu durumda yeni bir tetiklemenin
+# (watchdog veya Streamlit butonu üzerinden) üst üste binip aynı siparişleri
+# ikinci kez işlemesini (duplicate sheet) engeller.
+LOCK_FILE = Path(
+    os.getenv(
+        "JSX_LOCK_FILE",
+        str(Path.home() / "Desktop/autoprint-enterprise/data/.illustrator_busy.lock"),
+    )
+)
+LOCK_STALE_SECONDS = OSASCRIPT_TIMEOUT + 300
 
 
 def detect_product_type(sku: str) -> str:
@@ -128,23 +143,56 @@ class JSXTrigger:
                 "output": "",
                 "error": f"JSX script bulunamadı: {self.jsx_path}",
             }
-        success, returncode, out, err = self._run_osascript()
+        if not self._acquire_lock():
+            return {
+                "success": False,
+                "returncode": None,
+                "output": "",
+                "error": (
+                    "Illustrator şu anda başka bir batch işliyor gibi görünüyor "
+                    f"(lock: {LOCK_FILE}). Önceki işlem bitmeden tekrar tetiklemek "
+                    "duplicate sayfalara yol açar — lütfen bekleyin. Eğer önceki "
+                    "işlem gerçekten çökmüşse ve 10 dakikadan eskiyse lock otomatik "
+                    "temizlenir, ya da dosyayı elle silebilirsiniz."
+                ),
+            }
+        try:
+            success, returncode, out, err = self._run_osascript()
+        finally:
+            self._release_lock()
         return {"success": success, "returncode": returncode, "output": out, "error": err}
 
     def trigger_single(self, order: dict) -> dict:
         return self.trigger_batch([order])
 
+    def _acquire_lock(self) -> bool:
+        if LOCK_FILE.exists():
+            age = time.time() - LOCK_FILE.stat().st_mtime
+            if age < LOCK_STALE_SECONDS:
+                return False
+            LOCK_FILE.unlink(missing_ok=True)
+        LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
+        LOCK_FILE.write_text(str(os.getpid()), encoding="utf-8")
+        return True
+
+    def _release_lock(self) -> None:
+        LOCK_FILE.unlink(missing_ok=True)
+
     def _run_osascript(self) -> tuple[bool, int | None, str, str]:
+        # "with timeout of" olmadan AppleEvent'ler macOS'un varsayılan ~120s
+        # limitinde -1712 ile zaman aşımına uğrar — Illustrator script'i
+        # arka planda bitirmeye devam ederken Python tarafı "başarısız" sanır.
         script = (
-            f'tell application "Adobe Illustrator" to '
-            f'do javascript file "{self.jsx_path}"'
+            f"with timeout of {OSASCRIPT_TIMEOUT} seconds\n"
+            f'    tell application "Adobe Illustrator" to do javascript file "{self.jsx_path}"\n'
+            f"end timeout"
         )
         try:
             result = subprocess.run(
                 ["osascript", "-e", script],
                 capture_output=True,
                 text=True,
-                timeout=OSASCRIPT_TIMEOUT,
+                timeout=OSASCRIPT_TIMEOUT + 30,
             )
             return (
                 result.returncode == 0,
