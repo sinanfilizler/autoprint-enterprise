@@ -120,6 +120,13 @@ def build_etsy_batch_pdf(
         c.line(x, y + 2 * mm, HALF_W - margin, y + 2 * mm)
         y -= 6 * mm
 
+        ship_name = items[0].get("ship_name", "") if items else ""
+        if ship_name:
+            c.setFont("Helvetica-Bold", 13)
+            c.setFillColorRGB(0, 0, 0)
+            c.drawString(x, y, ship_name)
+            y -= 7 * mm
+
         c.setFont("Helvetica-Bold", 11)
         c.setFillColorRGB(0, 0, 0)
         c.drawString(x, y, f"Order ID:  {oid}")
@@ -131,19 +138,13 @@ def build_etsy_batch_pdf(
 
             sku = item.get("sku") or "—"
             qty = item.get("qty", 1)
-            c.setFont("Helvetica-Bold", 10)
-            c.setFillColorRGB(0, 0, 0)
-            c.drawString(x, y, f"SKU:  {sku}    QTY:  {qty}")
-            y -= 6 * mm
-
             product_name = sku_names.get(sku.upper(), "")
-            if product_name and y >= 15 * mm:
-                c.setFont("Helvetica-Oblique", 9)
-                c.setFillColorRGB(0.35, 0.35, 0.35)
-                c.drawString(x + 2 * mm, y, product_name[:60])
-                y -= 5 * mm
-            else:
-                y -= 1 * mm
+
+            c.setFont("Helvetica-Bold", 13)
+            c.setFillColorRGB(0, 0, 0)
+            line = f"{sku} - {product_name} - QTY: {qty}" if product_name else f"{sku} - QTY: {qty}"
+            c.drawString(x, y, line[:70])
+            y -= 7 * mm
 
             persona_fields = [(k, lbl) for k, lbl in PERSONA_KEYS if item.get(k)]
             for suffix, slabel in (("_male", "M"), ("_female", "F")):
@@ -155,15 +156,6 @@ def build_etsy_batch_pdf(
             extra_fields = item.get("extra_fields") or {}
 
             if persona_fields or extra_fields:
-                c.setFont("Helvetica-Bold", 9)
-                c.setFillColorRGB(0, 0, 0)
-                c.drawString(x, y, "Personalization")
-                y -= 1 * mm
-                c.setStrokeColorRGB(0.6, 0.6, 0.6)
-                c.setLineWidth(0.4)
-                c.line(x, y, HALF_W - margin, y)
-                y -= 5.5 * mm
-
                 lbl_x = x + 3 * mm
                 val_x = x + 30 * mm
 
