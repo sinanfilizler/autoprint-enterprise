@@ -368,7 +368,7 @@ def build_partner_batch_pdf(matched: list[dict], sku_names: dict[str, str] | Non
 
                 c.setFont("Helvetica-Bold", 14)
                 c.setFillColorRGB(0, 0, 0)
-                line = f"{sku} - (Qty-{qty}) - {product_name}" if product_name else f"{sku} - (Qty-{qty})"
+                line = f"{sku} - {product_name} - QTY: {qty}" if product_name else f"{sku} - QTY: {qty}"
                 c.drawString(x, y, line[:70])
                 y -= 7 * mm
 
