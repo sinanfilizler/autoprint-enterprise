@@ -381,7 +381,8 @@ def build_partner_batch_pdf(matched: list[dict], sku_names: dict[str, str] | Non
                         break
                     c.setFont("Helvetica", 10.5)
                     c.setFillColorRGB(0.15, 0.15, 0.15)
-                    c.drawString(x + 4 * mm, y, f"{label}: {str(val)[:55]}")
+                    shown = "YES" if val is True else str(val)
+                    c.drawString(x + 4 * mm, y, f"{label}: {shown[:55]}")
                     y -= 5.5 * mm
 
                 item_idx += 1

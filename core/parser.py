@@ -222,15 +222,19 @@ class AmazonParser:
             )
             return _html.unescape(re.sub(r'\s+', ' ', m.group(1).strip())) if m else ""
 
+        # Bizim slip'ler "GIFT BOX: Yes", bazı partner slip'leri
+        # "Packaging: Gift Box Included" / "Standard Packaging" kullanıyor
         gift_raw = _single("GIFT BOX")
+        packaging_raw = _single("Packaging")
+        gift_box = ("yes" in gift_raw.lower()) or ("gift box" in packaging_raw.lower())
 
         result = {
             "name":         names[0] if len(names) > 0 else "",
             "year":         _single("YEAR"),
             "message":      _single("MESSAGE"),
-            "font_option":  self._map_font(_single("Font")),
+            "font_option":  self._map_font(_single("Font") or _single("Fonts")),
             "color_option": self._map_color(_single("Color")),
-            "gift_box":     "yes" in gift_raw.lower() if gift_raw else False,
+            "gift_box":     gift_box,
         }
         for i, n in enumerate(names[1:], start=2):
             if i <= 10:
