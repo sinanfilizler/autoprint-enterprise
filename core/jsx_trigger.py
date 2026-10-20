@@ -30,6 +30,7 @@ COLOR_RGB = {
     "GOLD":   (198, 141, 37),
     "SILVER": (180, 180, 180),
     "GREEN":  (0, 134, 79),
+    "BLUE":   (0, 3, 216),
 }
 
 OSASCRIPT_TIMEOUT = int(os.getenv("OSASCRIPT_TIMEOUT", "3600"))

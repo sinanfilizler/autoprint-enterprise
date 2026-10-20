@@ -111,7 +111,7 @@ _FONT_OPTIONS: dict[str, str] = {
     "Great Vibes":              "great vibes",
 }
 
-_COLOR_OPTIONS = ["BLACK", "WHITE", "IVORY", "RED", "GOLD", "SILVER", "GREEN"]
+_COLOR_OPTIONS = ["BLACK", "WHITE", "IVORY", "RED", "GOLD", "SILVER", "GREEN", "BLUE"]
 
 
 # ── Bölüm 1: Add Replacement ─────────────────────────────────────────────────
