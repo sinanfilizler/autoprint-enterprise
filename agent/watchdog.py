@@ -89,7 +89,14 @@ class AutoPrintWatchdog:
 
         if result["success"]:
             log.info(f"Batch başarılı: {batch_id}")
-            item_ids = [str(o.get("order_item_id", "")) for o in orders]
+            failed = set(result.get("failed_ids") or [])
+            if failed:
+                log.error(f"JSX'te oluşturulamayan siparişler kuyrukta bırakıldı: {sorted(failed)} — "
+                          f"{result.get('jsx_errors', '')}")
+            if result.get("sheets") == 0 and result.get("skipped"):
+                log.warning(f"Yeni sheet yok: {result['skipped']} sipariş önceki bir batch'te zaten oluşturulmuş.")
+            item_ids = [str(o.get("order_item_id", "")) for o in orders
+                        if str(o.get("order_item_id", "")) not in failed]
             batch_result = self.sc.mark_processed_batch(item_ids)
             log.info(f"{batch_result['moved']} sipariş Log'a taşındı.")
             if batch_result["not_found"]:

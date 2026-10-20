@@ -127,6 +127,22 @@ def resolve_color_rgb(product_type: str, color_option: str) -> tuple[int, int, i
     return COLOR_RGB.get(color_option, COLOR_RGB["BLACK"])
 
 
+def parse_jsx_summary(output: str) -> dict:
+    """Render_Sheet.jsx'in döndürdüğü 'AUTOPRINT_RESULT sheets=N skipped=N failed=a,b | hatalar'
+    satırını çözer. Eski JSX (özet döndürmeyen) için boş dict döner."""
+    import re
+    m = re.search(r"AUTOPRINT_RESULT sheets=(\d+) skipped=(\d+) failed=([^ |]*)\s*\|?\s*(.*)",
+                  output or "", re.DOTALL)
+    if not m:
+        return {}
+    return {
+        "sheets":     int(m.group(1)),
+        "skipped":    int(m.group(2)),
+        "failed_ids": [x for x in m.group(3).split(",") if x],
+        "jsx_errors": m.group(4).strip(" ;"),
+    }
+
+
 class JSXTrigger:
     def __init__(self):
         self.jsx_path = Path(JSX_SCRIPT_PATH)
@@ -162,7 +178,14 @@ class JSXTrigger:
             success, returncode, out, err = self._run_osascript()
         finally:
             self._release_lock()
-        return {"success": success, "returncode": returncode, "output": out, "error": err}
+        result = {"success": success, "returncode": returncode, "output": out, "error": err,
+                  "sheets": None, "skipped": 0, "failed_ids": [], "jsx_errors": ""}
+        result.update(parse_jsx_summary(out))
+        # JSX çalıştı ama hiç sheet üretmedi ve atlanan da yok → başarı sayma
+        if success and result["sheets"] == 0 and not result["skipped"]:
+            result["success"] = False
+            result["error"] = "Hiç sheet oluşturulmadı. " + (result["jsx_errors"] or "")
+        return result
 
     def trigger_single(self, order: dict) -> dict:
         return self.trigger_batch([order])

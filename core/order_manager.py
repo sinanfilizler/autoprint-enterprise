@@ -30,7 +30,17 @@ class OrderManager:
         except (json.JSONDecodeError, OSError):
             return []
 
+    @staticmethod
+    def _normalize(order: dict) -> dict:
+        """Sheets yılı sayı (2026) döndürebiliyor; JSX bu alanları metin bekliyor."""
+        o = dict(order)
+        for key in ["year", "message", "name"] + [f"name{i}" for i in range(2, 11)]:
+            if key in o and o[key] is not None and not isinstance(o[key], str):
+                o[key] = str(o[key])
+        return o
+
     def save_orders(self, orders: list[dict]) -> None:
+        orders = [self._normalize(o) for o in orders]
         self.orders_path.parent.mkdir(parents=True, exist_ok=True)
         tmp_path = self.orders_path.with_suffix(".tmp")
         tmp_path.write_text(

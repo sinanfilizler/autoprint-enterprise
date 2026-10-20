@@ -370,6 +370,16 @@ if "last_result" in st.session_state:
         if r.get("not_found"):
             msg += f" Bulunamayan ID'ler: {', '.join(r['not_found'])}"
         st.info(msg)
+        if r.get("failed_ids"):
+            st.error(
+                f"⚠️ {len(r['failed_ids'])} sipariş Illustrator'da oluşturulamadı ve kuyrukta bırakıldı: "
+                f"{', '.join(r['failed_ids'])}\n\n{r.get('jsx_errors', '')}"
+            )
+        if r.get("sheets") == 0 and r.get("skipped"):
+            st.warning(
+                f"⚠️ Yeni sheet oluşturulmadı: {r['skipped']} sipariş daha önceki bir batch'te zaten "
+                "oluşturulmuştu (processed_orders.txt). Dosyalar önceki batch klasöründe olmalı."
+            )
     else:
         st.warning(f"Son gönderim başarısız: {r.get('error', '?')}")
     if r.get("returncode") is not None:
@@ -593,10 +603,13 @@ with tab_queue:
                         result = jsx.trigger_batch(resolved_orders)
 
                     if result["success"]:
+                        # JSX'te hata veren siparişler kuyrukta kalır
+                        failed = set(result.get("failed_ids") or [])
+                        done_orders = [o for o in orders if str(o["order_item_id"]) not in failed]
                         with st.spinner("Sheets güncelleniyor..."):
-                            item_ids = [str(o["order_item_id"]) for o in orders]
+                            item_ids = [str(o["order_item_id"]) for o in done_orders]
                             batch_result = sc.mark_processed_batch(item_ids)
-                            for order in orders:
+                            for order in done_orders:
                                 order_mgr.mark_processed(
                                     str(order["order_item_id"]),
                                     bool(order.get("is_manual", False)),
@@ -605,6 +618,10 @@ with tab_queue:
                             "success": True,
                             "moved": batch_result["moved"],
                             "not_found": batch_result["not_found"],
+                            "sheets": result.get("sheets"),
+                            "skipped": result.get("skipped", 0),
+                            "failed_ids": sorted(failed),
+                            "jsx_errors": result.get("jsx_errors", ""),
                             "returncode": result["returncode"],
                             "output": result["output"],
                             "stderr": result["error"],
