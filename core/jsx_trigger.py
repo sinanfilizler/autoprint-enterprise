@@ -29,6 +29,7 @@ COLOR_RGB = {
     "RED":    (180, 30, 40),
     "GOLD":   (198, 141, 37),
     "SILVER": (180, 180, 180),
+    "GREEN":  (0, 134, 79),
 }
 
 OSASCRIPT_TIMEOUT = int(os.getenv("OSASCRIPT_TIMEOUT", "3600"))
@@ -182,8 +183,12 @@ class JSXTrigger:
         # "with timeout of" olmadan AppleEvent'ler macOS'un varsayılan ~120s
         # limitinde -1712 ile zaman aşımına uğrar — Illustrator script'i
         # arka planda bitirmeye devam ederken Python tarafı "başarısız" sanır.
+        # Render_Sheet.jsx copies/pastes between documents; Illustrator refuses
+        # that (Error 9002) unless it is the front application, so bring it forward.
         script = (
             f"with timeout of {OSASCRIPT_TIMEOUT} seconds\n"
+            f'    tell application "Adobe Illustrator" to activate\n'
+            f"    delay 1\n"
             f'    tell application "Adobe Illustrator" to do javascript file "{self.jsx_path}"\n'
             f"end timeout"
         )

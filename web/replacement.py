@@ -6,7 +6,8 @@ Replacement sekmesi UI.
   Pending Replacements : ADMIN_PASSWORD gerekli (Headquarter)
 
 Label PDF'ler Google Sheets ReplacementLabels sheet'inde chunk'lar halinde tutulur.
-İndir / Kuyruğa Ekle sonrası chunk'lar silinir (label_chunk_count = 0 olur).
+İndir / Kuyruğa Ekle replacement'ı listeden düşürmez; sadece status'a işaret koyar.
+"✔️ Tamamlandı" basılınca chunk'lar silinir ve status='done' olur.
 """
 
 import io
@@ -110,7 +111,7 @@ _FONT_OPTIONS: dict[str, str] = {
     "Great Vibes":              "great vibes",
 }
 
-_COLOR_OPTIONS = ["BLACK", "WHITE", "IVORY", "RED", "GOLD", "SILVER"]
+_COLOR_OPTIONS = ["BLACK", "WHITE", "IVORY", "RED", "GOLD", "SILVER", "GREEN"]
 
 
 # ── Bölüm 1: Add Replacement ─────────────────────────────────────────────────
@@ -203,16 +204,17 @@ def _render_add(sc) -> None:
         if png_bytes:
             st.image(png_bytes, caption="Label", use_container_width=True)
 
-        # Personalization verisi: tek item → dict, birden fazla → list
-        if len(items) == 1:
-            sku_display  = items[0]["sku"]
-            persona_data = _parse_persona(items[0]["personalization"])
-        else:
-            sku_display  = f"{items[0]['sku']} +{len(items) - 1}"
-            persona_data = [
-                {"sku": it["sku"], "personalization": _parse_persona(it["personalization"])}
-                for it in items
-            ]
+        # Her zaman list formatında yaz — font/renk seçimi item içinde saklanır
+        sku_display = items[0]["sku"] if len(items) == 1 else f"{items[0]['sku']} +{len(items) - 1}"
+        persona_data = [
+            {
+                "sku":             it["sku"],
+                "personalization": _parse_persona(it["personalization"]),
+                "font_option":     it.get("font_option", "SERIF"),
+                "color_option":    it.get("color_option", "BLACK"),
+            }
+            for it in items
+        ]
 
         data = {
             "replacement_id":   str(uuid.uuid4()),
@@ -273,7 +275,12 @@ def _render_pending(sc) -> None:
         view_key = f"repl_png_{rid}"
         pdf_key  = f"repl_pdf_{rid}"
 
-        label = f"**{sku}** — {rtype} — {created}"
+        status   = str(item.get("status", "")).strip()
+        is_queued     = "queued" in status
+        is_downloaded = "downloaded" in status
+        badges = ("  ·  ✅ Kuyrukta" if is_queued else "") + ("  ·  ⬇️ İndirildi" if is_downloaded else "")
+
+        label = f"**{sku}** — {rtype} — {created}{badges}"
         with st.expander(label, expanded=False):
 
             # ── Bilgi ──────────────────────────────────────────────────────
@@ -286,7 +293,9 @@ def _render_pending(sc) -> None:
                         it_sku = it.get("sku", "?")
                         it_persona = it.get("personalization", {})
                         persona_str = "  ·  ".join(f"{k}: {v}" for k, v in it_persona.items())
-                        st.markdown(f"**{idx+1}.** `{it_sku}` — {persona_str or '—'}")
+                        style = " / ".join(x for x in (it.get("font_option"), it.get("color_option")) if x)
+                        style_str = f"  _({style})_" if style else ""
+                        st.markdown(f"**{idx+1}.** `{it_sku}` — {persona_str or '—'}{style_str}")
                 else:
                     st.markdown(f"**SKU:** {sku}")
                     cols = st.columns(min(len(p_data), 3) or 1)
@@ -299,10 +308,10 @@ def _render_pending(sc) -> None:
 
             # ── Label yok notu ─────────────────────────────────────────────
             if chunk_count == 0:
-                st.caption("🗑️ Label silindi (işlendi)")
+                st.caption("🗑️ Label yok")
 
             # ── Butonlar ───────────────────────────────────────────────────
-            btn_cols = st.columns(3)
+            btn_cols = st.columns(4)
 
             # 1) Label Görüntüle
             with btn_cols[0]:
@@ -315,21 +324,20 @@ def _render_pending(sc) -> None:
                         else:
                             st.error("Label okunamadı.")
 
-            # 2) Kuyruğa Ekle
+            # 2) Kuyruğa Ekle — tekrar basılabilir ama etiketi uyarır (duplicate baskı riski)
             with btn_cols[1]:
-                if st.button("✅ Kuyruğa Ekle", key=f"repl_queue_{rid}"):
+                q_label = "🔁 Tekrar Kuyruğa Ekle" if is_queued else "✅ Kuyruğa Ekle"
+                if st.button(q_label, key=f"repl_queue_{rid}"):
                     _action_queue(sc, item)
 
-            # 3) Label İndir (iki adım)
+            # 3) Label İndir (iki adım) — PDF session'da kalır, tekrar indirilebilir
             with btn_cols[2]:
                 if pdf_key not in st.session_state:
                     btn_label = "⬇️ Hazırla PDF" if chunk_count > 0 else "⬇️ PDF Yok"
                     if st.button(btn_label, key=f"repl_prep_{rid}", disabled=(chunk_count == 0)):
                         with st.spinner("A4 PDF hazırlanıyor..."):
                             raw = sc.get_replacement_label(rid)
-                            a4  = _build_a4(sku, rtype, p_json, created, raw)
-                            st.session_state[pdf_key] = a4
-                        sc.delete_replacement_label_chunks(rid)
+                            st.session_state[pdf_key] = _build_a4(sku, rtype, p_json, created, raw)
                         st.rerun()
                 else:
                     fname = f"replacement_{sku}_{created[:10]}.pdf"
@@ -340,9 +348,19 @@ def _render_pending(sc) -> None:
                         mime="application/pdf",
                         key=f"repl_dl_{rid}",
                     ):
-                        sc.update_replacement_status(rid, "downloaded")
-                        del st.session_state[pdf_key]
-                        st.rerun()
+                        if not is_downloaded:
+                            sc.update_replacement_status(rid, _add_flag(status, "downloaded"))
+                            st.rerun()
+
+            # 4) Tamamlandı — listeden düşüren tek buton
+            with btn_cols[3]:
+                if st.button("✔️ Tamamlandı", key=f"repl_done_{rid}", type="primary"):
+                    with st.spinner("Kapatılıyor..."):
+                        sc.delete_replacement_label_chunks(rid)
+                        sc.update_replacement_status(rid, "done")
+                    st.session_state.pop(pdf_key, None)
+                    st.session_state.pop(view_key, None)
+                    st.rerun()
 
             # ── Preview göster ─────────────────────────────────────────────
             if view_key in st.session_state and st.session_state[view_key]:
@@ -354,6 +372,13 @@ def _render_pending(sc) -> None:
                 if st.button("Kapat", key=f"repl_close_{rid}"):
                     del st.session_state[view_key]
                     st.rerun()
+
+
+def _add_flag(status: str, flag: str) -> str:
+    """'queued' / 'downloaded' işaretlerini birleştirir (ikisi birden → queued_downloaded)."""
+    flags = {f for f in ("queued", "downloaded") if f in (status or "")}
+    flags.add(flag)
+    return "_".join(f for f in ("queued", "downloaded") if f in flags)
 
 
 def _persona_to_order(rid: str, item_sku: str, persona: dict, idx: int = 0,
@@ -378,8 +403,8 @@ def _persona_to_order(rid: str, item_sku: str, persona: dict, idx: int = 0,
 
 def _action_queue(sc, item: dict) -> None:
     """Replacement'ı orders.json'a yazar, Illustrator'ı tetikler,
-    chunk'ları siler, status='queued' yapar."""
-    from core.jsx_trigger import JSXTrigger, detect_product_type
+    status'a 'queued' işareti koyar. Label silinmez (Tamamlandı'da silinir)."""
+    from core.jsx_trigger import JSXTrigger, detect_product_type, resolve_font
     from core.order_manager import OrderManager
 
     rid = item.get("replacement_id", "")
@@ -405,6 +430,10 @@ def _action_queue(sc, item: dict) -> None:
             color_option=it.get("color_option", "BLACK"),
         ))
 
+    # Font kodunu Illustrator'ın beklediği isme çevir (kuyruk akışıyla aynı)
+    for o in orders:
+        o["font_option"] = resolve_font(detect_product_type(o["sku"]), o["font_option"])
+
     try:
         OrderManager().add_orders(orders)
     except Exception as exc:
@@ -425,8 +454,7 @@ def _action_queue(sc, item: dict) -> None:
         except Exception as exc:
             st.warning(f"JSX tetiklenemedi: {exc}")
 
-    sc.delete_replacement_label_chunks(rid)
-    sc.update_replacement_status(rid, "queued")
+    sc.update_replacement_status(rid, _add_flag(str(item.get("status", "")), "queued"))
     st.success("Kuyruğa eklendi.")
     st.rerun()
 

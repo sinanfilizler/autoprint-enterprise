@@ -17,7 +17,7 @@ from core.parser import AmazonParser, ParseError
 from core.jsx_trigger import JSXTrigger, detect_product_type, resolve_font
 from core.parse_utils import parse_uploaded_files
 from listing_approval import render_listing_approval
-from replacement import render_replacement
+from replacement import render_replacement, _FONT_OPTIONS as REPL_FONT_OPTIONS, _COLOR_OPTIONS as REPL_COLOR_OPTIONS
 from partner_upload import render_partner_upload
 
 st.set_page_config(
@@ -479,8 +479,8 @@ with tab_upload:
                 m_year          = st.text_input("Yıl", placeholder="2024")
                 m_message       = st.text_area("Mesaj", height=80)
             with col2:
-                m_font  = st.selectbox("Font", ["SERIF", "SANS", "SCRIPT", "WELCOME"])
-                m_color = st.selectbox("Renk", ["BLACK", "WHITE", "GOLD", "RED", "SILVER", "IVORY"])
+                m_font_label = st.selectbox("Font", list(REPL_FONT_OPTIONS.keys()))
+                m_color      = st.selectbox("Renk", REPL_COLOR_OPTIONS)
                 st.markdown("**İsimler**")
                 m_names = []
                 for n in range(1, 11):
@@ -507,7 +507,7 @@ with tab_upload:
                     "name":           m_names[0].strip(),
                     "year":           m_year.strip(),
                     "message":        m_message.strip(),
-                    "font_option":    m_font,
+                    "font_option":    REPL_FONT_OPTIONS[m_font_label],
                     "color_option":   m_color,
                     "is_manual":      True,
                     "source":         "internal",

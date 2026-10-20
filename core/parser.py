@@ -20,10 +20,11 @@ COLOR_MAPPING = {
     "Red": "RED",
     "Silver": "SILVER",
     "Ivory": "IVORY",
+    "Green": "GREEN",
 }
 
 VALID_FONTS = {"SERIF", "SANS", "SCRIPT", "WELCOME"}
-VALID_COLORS = {"BLACK", "WHITE", "GOLD", "RED", "SILVER", "IVORY"}
+VALID_COLORS = {"BLACK", "WHITE", "GOLD", "RED", "SILVER", "IVORY", "GREEN"}
 
 
 class ParseError(Exception):
