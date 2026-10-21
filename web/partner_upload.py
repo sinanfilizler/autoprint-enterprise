@@ -13,7 +13,7 @@ from pathlib import Path
 import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from core.parse_utils import parse_uploaded_files, apply_sku_fonts
+from core.parse_utils import parse_uploaded_files
 
 
 
@@ -83,7 +83,7 @@ def _parse_labels_etsy(uploaded_pdfs) -> tuple[dict[str, int], dict[str, bytes],
     return oid_to_page, oid_to_pdf, warnings
 
 
-# Partner başına varsayılan font — yalnızca packing slip'te #FONT tag'i yoksa uygulanır
+# Partner başına sabit font — slip'teki #FONT'tan bağımsız olarak her siparişe uygulanır
 _PARTNER_DEFAULT_FONTS: dict[str, str] = {
     "thegiftytrove": "DANCING_SCRIPT",
 }
@@ -216,18 +216,12 @@ def render_partner_upload(sc) -> None:
         # ── Adım 4a: Queue'ya Ekle ───────────────────────────────────────────
         orders_to_queue = []
         partner_default_font = _PARTNER_DEFAULT_FONTS.get(selected_id.lower())
-        # Öncelik: slip'teki #FONT > SKUFonts sekmesi > partner varsayılanı
-        if platform_key == "etsy":
-            try:
-                apply_sku_fonts([o for oid in matched_oids for o in orders_by_oid[oid]], sc.get_sku_fonts())
-            except Exception as exc:
-                st.warning(f"SKUFonts okunamadı: {exc}")
         for oid in matched_oids:
             for o in orders_by_oid[oid]:
                 o_copy = dict(o)
                 o_copy["source"] = selected_id
                 o_copy.setdefault("platform", platform_key)
-                if partner_default_font and not o_copy.get("font_option"):
+                if partner_default_font:
                     o_copy["font_option"] = partner_default_font
                 orders_to_queue.append(o_copy)
 
