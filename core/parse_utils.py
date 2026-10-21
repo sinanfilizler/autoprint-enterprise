@@ -47,3 +47,19 @@ def parse_uploaded_files(files, source_platform: str) -> tuple[list[dict], list[
             all_warnings.append(f"[{uf.name}] Beklenmeyen hata: {type(e).__name__}: {e}")
 
     return all_orders, all_warnings
+
+
+def apply_sku_fonts(orders: list[dict], sku_fonts: dict[str, str]) -> list[str]:
+    """Slip'te font yazmayan siparişlere SKUFonts sekmesindeki fontu atar.
+    Sheet'te fontu olmayan SKU'ların listesini döner (uyarı için)."""
+    missing: list[str] = []
+    for o in orders:
+        if o.get("font_option"):
+            continue
+        sku = str(o.get("sku", "")).strip().upper()
+        font = sku_fonts.get(sku)
+        if font:
+            o["font_option"] = font
+        elif sku and sku not in missing:
+            missing.append(sku)
+    return missing

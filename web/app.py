@@ -15,7 +15,7 @@ load_dotenv()
 from core.order_manager import OrderManager
 from core.parser import AmazonParser, ParseError
 from core.jsx_trigger import JSXTrigger, detect_product_type, resolve_font
-from core.parse_utils import parse_uploaded_files
+from core.parse_utils import parse_uploaded_files, apply_sku_fonts
 from listing_approval import render_listing_approval
 from replacement import render_replacement, _FONT_OPTIONS as REPL_FONT_OPTIONS, _COLOR_OPTIONS as REPL_COLOR_OPTIONS
 from partner_upload import render_partner_upload
@@ -438,6 +438,16 @@ with tab_upload:
             for o in all_parsed:
                 o.setdefault("source", "internal")
                 o.setdefault("platform", upload_platform_key)
+            if upload_platform_key == "etsy" and sc:
+                try:
+                    no_font = apply_sku_fonts(all_parsed, sc.get_sku_fonts())
+                    if no_font:
+                        st.info(
+                            "SKUFonts sekmesinde fontu olmayan SKU'lar (Monotype Corsiva kullanılacak): "
+                            + ", ".join(no_font)
+                        )
+                except Exception as exc:
+                    st.warning(f"SKUFonts okunamadı, varsayılan font kullanılacak: {exc}")
             st.success(f"{len(all_parsed)} sipariş parse edildi. Aşağıyı kontrol edin:")
             st.dataframe(_orders_to_df(all_parsed), use_container_width=True)
 

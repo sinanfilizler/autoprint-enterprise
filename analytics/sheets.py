@@ -35,6 +35,8 @@ REPLACEMENTS_SHEET = "Replacements"
 REPLACEMENT_LABELS_SHEET = "ReplacementLabels"
 SKU_NAMES_SHEET = "SKUNames"
 SKU_NAMES_COLUMNS = ["partner_id", "sku", "product_name"]
+SKU_FONTS_SHEET = "SKUFonts"
+SKU_FONTS_COLUMNS = ["sku", "font"]
 
 # ── Sütun düzeni ────────────────────────────────────────────────────────────
 QUEUE_COLUMNS = [
@@ -113,6 +115,7 @@ class SheetsClient:
         )
         self._partners = self._get_or_create_sheet("Partners", PARTNERS_COLUMNS)
         self._sku_names = self._get_or_create_sheet(SKU_NAMES_SHEET, SKU_NAMES_COLUMNS)
+        self._sku_fonts = self._get_or_create_sheet(SKU_FONTS_SHEET, SKU_FONTS_COLUMNS)
 
         self._cache: dict = {}  # key → (timestamp, value)
 
@@ -723,6 +726,21 @@ class SheetsClient:
                 continue
             result.setdefault(pid, {})[sku] = name
         self._cache[cache_key] = (time.monotonic(), result)
+        return result
+
+    def get_sku_fonts(self) -> dict[str, str]:
+        """SKUFonts sekmesinden {SKU: font} döner (5dk cache). Etsy siparişlerinde
+        slip'te #FONT yoksa bu font kullanılır."""
+        cached = self._cache.get("sku_fonts")
+        if cached and time.monotonic() - cached[0] < 300:
+            return cached[1]
+        result: dict[str, str] = {}
+        for r in self._sku_fonts.get_all_records(default_blank=""):
+            sku = str(r.get("sku", "")).strip().upper()
+            font = str(r.get("font", "")).strip()
+            if sku and font:
+                result[sku] = font
+        self._cache["sku_fonts"] = (time.monotonic(), result)
         return result
 
     def upsert_sku_name(self, partner_id: str, sku: str, product_name: str) -> None:

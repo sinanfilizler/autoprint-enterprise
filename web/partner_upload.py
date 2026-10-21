@@ -13,7 +13,7 @@ from pathlib import Path
 import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from core.parse_utils import parse_uploaded_files
+from core.parse_utils import parse_uploaded_files, apply_sku_fonts
 
 
 
@@ -216,6 +216,12 @@ def render_partner_upload(sc) -> None:
         # ── Adım 4a: Queue'ya Ekle ───────────────────────────────────────────
         orders_to_queue = []
         partner_default_font = _PARTNER_DEFAULT_FONTS.get(selected_id.lower())
+        # Öncelik: slip'teki #FONT > SKUFonts sekmesi > partner varsayılanı
+        if platform_key == "etsy":
+            try:
+                apply_sku_fonts([o for oid in matched_oids for o in orders_by_oid[oid]], sc.get_sku_fonts())
+            except Exception as exc:
+                st.warning(f"SKUFonts okunamadı: {exc}")
         for oid in matched_oids:
             for o in orders_by_oid[oid]:
                 o_copy = dict(o)

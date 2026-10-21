@@ -83,6 +83,9 @@ _FONT_MAP: dict[str, str] = {
     "sans":               "MonotypeCorsiva",
     "script":             "MonotypeCorsiva",
     "welcome":            "WelcomeChristmas",
+    "monotype corsiva":   "MonotypeCorsiva",
+    "welcome christmas":  "WelcomeChristmas",
+    "joseph sophia":      "josephsophia",
     "dancing_script":     "DancingScript-Regular",
     "dancing script":     "DancingScript-Regular",
     # Sipariş font adları → Illustrator (case-insensitive arama için küçük harf)
