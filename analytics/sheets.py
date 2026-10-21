@@ -36,7 +36,7 @@ REPLACEMENT_LABELS_SHEET = "ReplacementLabels"
 SKU_NAMES_SHEET = "SKUNames"
 SKU_NAMES_COLUMNS = ["partner_id", "sku", "product_name"]
 SKU_FONTS_SHEET = "SKUFonts"
-SKU_FONTS_COLUMNS = ["sku", "font"]
+SKU_FONTS_COLUMNS = ["sku", "name", "font"]  # name sadece okuma kolaylığı için, kod kullanmaz
 
 # ── Sütun düzeni ────────────────────────────────────────────────────────────
 QUEUE_COLUMNS = [
