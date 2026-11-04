@@ -313,6 +313,48 @@ def _orders_to_df(orders: list[dict], font_map: dict | None = None) -> pd.DataFr
     return pd.DataFrame(rows)
 
 
+def _font_label_for(value) -> str | None:
+    """Sheets'teki font değerini (SERIF, Great Vibes, GreatVibes-Regular...) form etiketine çevirir."""
+    v = str(value or "").strip()
+    if not v:
+        return None
+    target = resolve_font("round_ceramic", v)
+    for label, code in REPL_FONT_OPTIONS.items():
+        if v.lower() in (label.lower(), code.lower()) or resolve_font("round_ceramic", code) == target:
+            return label
+    return None
+
+
+def _fill_manual_form(o: dict) -> None:
+    """Bulunan siparişi manuel sipariş formunun alanlarına yazar."""
+    st.session_state["m_order_id"] = str(o.get("order_id", ""))
+    st.session_state["m_order_item_id"] = ""  # boş: yeni manuel ID üretilir (eski ID duplicate sayılır)
+    st.session_state["m_sku"] = str(o.get("sku", ""))
+    try:
+        st.session_state["m_qty"] = min(max(int(o.get("qty") or 1), 1), 99)
+    except (ValueError, TypeError):
+        st.session_state["m_qty"] = 1
+    st.session_state["m_year"] = str(o.get("year", "") or "")
+    st.session_state["m_message"] = str(o.get("message", "") or "")
+    raw_font = str(o.get("font_option", "") or "").strip()
+    label = _font_label_for(raw_font)
+    st.session_state["m_font_extra"] = None
+    if label:
+        st.session_state["m_font"] = label
+    elif raw_font and "#" not in raw_font:  # "#" = font sütununa yanlış yazılmış renk
+        # Listede olmayan font (Charm, Lato...): siparişteki haliyle ek seçenek olarak sun
+        extra = f"{raw_font} (siparişteki font)"
+        st.session_state["m_font_extra"] = (extra, raw_font)
+        st.session_state["m_font"] = extra
+    else:
+        st.session_state["m_font"] = list(REPL_FONT_OPTIONS.keys())[0]
+    color = str(o.get("color_option", "") or "").upper()
+    st.session_state["m_color"] = color if color in REPL_COLOR_OPTIONS else "BLACK"
+    for n in range(1, 11):
+        key = "name" if n == 1 else f"name{n}"
+        st.session_state[f"m_name_{n}"] = str(o.get(key, "") or "")
+
+
 def _validate_manual(sku) -> list[str]:
     errors = []
     if not sku.strip(): errors.append("SKU zorunlu.")
@@ -489,18 +531,69 @@ with tab_upload:
     st.divider()
 
     with st.expander("✏️ Manuel Sipariş Ekle"):
+        # ── Order ID ile daha önce yüklenmiş siparişi bul, formu doldur ──
+        lk_col1, lk_col2 = st.columns([3, 1])
+        with lk_col1:
+            lookup_id = st.text_input(
+                "Order ID ile bilgileri getir (isteğe bağlı)",
+                placeholder="123-4567890-1234567", key="m_lookup_id",
+            )
+        with lk_col2:
+            st.markdown("<div style='height:1.75rem'></div>", unsafe_allow_html=True)
+            do_lookup = st.button("🔎 Bilgileri Getir", use_container_width=True)
+        if do_lookup:
+            st.session_state.pop("m_lookup_results", None)
+            if not lookup_id.strip():
+                st.warning("Bir Order ID yazın.")
+            elif not sc:
+                st.error("Google Sheets bağlantısı yok.")
+            else:
+                oid = lookup_id.strip()
+                with st.spinner("Sipariş aranıyor..."):
+                    found: dict[str, dict] = {}
+                    for row in sc.get_log() + sc.get_queue():  # kuyruktaki daha günceldir, sona yazılır
+                        if str(row.get("order_id", "")).strip() == oid:
+                            found[str(row.get("order_item_id", ""))] = row
+                matches = list(found.values())
+                if not matches:
+                    st.warning("Bu Order ID sistemde bulunamadı. Bilgileri elle girin.")
+                elif len(matches) == 1:
+                    _fill_manual_form(matches[0])
+                    st.rerun()
+                else:
+                    st.session_state["m_lookup_results"] = matches
+
+        lookup_results = st.session_state.get("m_lookup_results")
+        if lookup_results:
+            st.info(f"Bu siparişte {len(lookup_results)} ürün var. Hangisini eklemek istiyorsunuz?")
+            pick_labels = [
+                f"{i+1}. {r.get('sku', '?')}  —  {r.get('name', '') or '-'}"
+                for i, r in enumerate(lookup_results)
+            ]
+            pick = st.selectbox("Ürün", pick_labels, key="m_lookup_pick")
+            if st.button("Forma Aktar"):
+                _fill_manual_form(lookup_results[pick_labels.index(pick)])
+                st.session_state.pop("m_lookup_results", None)
+                st.rerun()
+
+        font_options = dict(REPL_FONT_OPTIONS)
+        if st.session_state.get("m_font_extra"):
+            extra_label, extra_value = st.session_state["m_font_extra"]
+            font_options[extra_label] = extra_value
+
+        st.session_state.setdefault("m_qty", 1)
         with st.form("manual_order_form"):
             col1, col2, col3 = st.columns(3)
             with col1:
-                m_order_id      = st.text_input("Order ID", placeholder="123-4567890-1234567")
-                m_order_item_id = st.text_input("Order Item ID", placeholder="12345678901234")
-                m_sku           = st.text_input("SKU *", placeholder="CRMC1246")
-                m_qty           = st.number_input("Adet", min_value=1, max_value=99, value=1)
-                m_year          = st.text_input("Yıl", placeholder="2024")
-                m_message       = st.text_area("Mesaj", height=80)
+                m_order_id      = st.text_input("Order ID", placeholder="123-4567890-1234567", key="m_order_id")
+                m_order_item_id = st.text_input("Order Item ID", placeholder="Boş bırakılırsa otomatik", key="m_order_item_id")
+                m_sku           = st.text_input("SKU *", placeholder="CRMC1246", key="m_sku")
+                m_qty           = st.number_input("Adet", min_value=1, max_value=99, key="m_qty")
+                m_year          = st.text_input("Yıl", placeholder="2024", key="m_year")
+                m_message       = st.text_area("Mesaj", height=80, key="m_message")
             with col2:
-                m_font_label = st.selectbox("Font", list(REPL_FONT_OPTIONS.keys()))
-                m_color      = st.selectbox("Renk", REPL_COLOR_OPTIONS)
+                m_font_label = st.selectbox("Font", list(font_options.keys()), key="m_font")
+                m_color      = st.selectbox("Renk", REPL_COLOR_OPTIONS, key="m_color")
                 st.markdown("**İsimler**")
                 m_names = []
                 for n in range(1, 11):
@@ -527,7 +620,7 @@ with tab_upload:
                     "name":           m_names[0].strip(),
                     "year":           m_year.strip(),
                     "message":        m_message.strip(),
-                    "font_option":    REPL_FONT_OPTIONS[m_font_label],
+                    "font_option":    font_options[m_font_label],
                     "color_option":   m_color,
                     "is_manual":      True,
                     "source":         "internal",
