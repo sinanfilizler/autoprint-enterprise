@@ -21,6 +21,9 @@ Mevcut masaüstü sistem (PyQt5) tamamen yedekte, bu proje sıfırdan inşa edil
   data/render_options.json ({"save_pdf": true}) yazar, JSX sheet'leri .ai yerine PDF kaydeder
   (Acrobat 7 / PDF 1.6, renk dönüşümü yok, preserveEditability=false). Dosya iş bitince silinir;
   kutucuk her gönderimden sonra kapanır. Normal akış, watchdog ve Replacement hep .ai üretir.
+  PDF adı: sheet'teki tüm ürünler aynı order_item_id'ye sahipse o ID (vehicles1.pdf, taşarsa
+  vehicles1_2.pdf); karışık sheet'te eski usul sheet_NN_<shape>.pdf. Kullanıcı toplu baskıda
+  order_item_id'yi elle (vehicles1, vehicles2...) yazıyor.
 - Adobe Illustrator — osascript ile JSX tetikleme
 - Illustrator JSX komutu: osascript -e 'tell application "Adobe Illustrator" ...'
 - osascript timeout: 3600 saniye (büyük batch'ler için gerekli)
