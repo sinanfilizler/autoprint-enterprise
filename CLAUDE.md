@@ -15,7 +15,12 @@ Mevcut masaüstü sistem (PyQt5) tamamen yedekte, bu proje sıfırdan inşa edil
 
 ## Donanım ve Ortam
 - OS: macOS
-- Yazıcı: Epson SureColor F570 Pro (dye-sublimation)
+- Yazıcı: Roland MO-240 (UV flatbed). Baskı VersaWorks üzerinden; sheet'ler PDF'e çevrilip VersaWorks'e atılır.
+  (Eski Epson SureColor F570 sublimasyon yazıcısı artık kullanılmıyor.)
+- Toplu baskı PDF modu: Kuyruk sekmesinde "PDF olarak kaydet" işaretlenirse Python
+  data/render_options.json ({"save_pdf": true}) yazar, JSX sheet'leri .ai yerine PDF kaydeder
+  (Acrobat 7 / PDF 1.6, renk dönüşümü yok, preserveEditability=false). Dosya iş bitince silinir;
+  kutucuk her gönderimden sonra kapanır. Normal akış, watchdog ve Replacement hep .ai üretir.
 - Adobe Illustrator — osascript ile JSX tetikleme
 - Illustrator JSX komutu: osascript -e 'tell application "Adobe Illustrator" ...'
 - osascript timeout: 3600 saniye (büyük batch'ler için gerekli)

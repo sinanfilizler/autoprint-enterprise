@@ -49,6 +49,10 @@ LOCK_FILE = Path(
 )
 LOCK_STALE_SECONDS = OSASCRIPT_TIMEOUT + 300
 
+# Tek seferlik render seçenekleri (ör. toplu baskıda PDF kaydet). Sadece istenen
+# gönderimde yazılır, iş bitince silinir; yoksa JSX her zamanki gibi .ai kaydeder.
+RENDER_OPTIONS_FILE = Path(JSX_SCRIPT_PATH).parent / "render_options.json"
+
 
 def detect_product_type(sku: str) -> str:
     if sku.startswith("ACRY2"):
@@ -156,7 +160,7 @@ class JSXTrigger:
         if result.returncode != 0:
             print("[UYARI] osascript bulunamadı — macOS dışında çalışıyor olabilirsiniz.")
 
-    def trigger_batch(self, orders: list[dict]) -> dict:
+    def trigger_batch(self, orders: list[dict], save_pdf: bool = False) -> dict:
         if not self.jsx_path.exists():
             return {
                 "success": False,
@@ -178,8 +182,12 @@ class JSXTrigger:
                 ),
             }
         try:
+            RENDER_OPTIONS_FILE.unlink(missing_ok=True)
+            if save_pdf:
+                RENDER_OPTIONS_FILE.write_text('{"save_pdf": true}', encoding="utf-8")
             success, returncode, out, err = self._run_osascript()
         finally:
+            RENDER_OPTIONS_FILE.unlink(missing_ok=True)
             self._release_lock()
         result = {"success": success, "returncode": returncode, "output": out, "error": err,
                   "sheets": None, "skipped": 0, "failed_ids": [], "jsx_errors": ""}

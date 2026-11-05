@@ -699,6 +699,17 @@ with tab_queue:
                 )
             st.divider()
 
+            # Toplu baskı: sheet'ler .ai yerine PDF kaydedilir (VersaWorks'e direkt atmak için).
+            # Her gönderimden sonra kapanır; normal siparişler hep .ai olarak kalır.
+            if st.session_state.pop("send_pdf_reset", False):
+                st.session_state["send_pdf"] = False
+            send_pdf = st.checkbox(
+                "📄 PDF olarak kaydet (toplu baskı)",
+                key="send_pdf",
+                help="Açıksa sheet'ler .ai yerine sadece PDF olarak kaydedilir. "
+                     "Gönderimden sonra kendiliğinden kapanır.",
+            )
+
             col_send, col_dry = st.columns(2)
 
             with col_send:
@@ -715,8 +726,12 @@ with tab_queue:
                     order_mgr.save_orders(resolved_orders)
 
                     jsx = JSXTrigger()
-                    with st.spinner(f"{len(resolved_orders)} sipariş Illustrator'a gönderiliyor..."):
-                        result = jsx.trigger_batch(resolved_orders)
+                    with st.spinner(
+                        f"{len(resolved_orders)} sipariş Illustrator'a gönderiliyor"
+                        + (" (PDF)..." if send_pdf else "...")
+                    ):
+                        result = jsx.trigger_batch(resolved_orders, save_pdf=send_pdf)
+                    st.session_state["send_pdf_reset"] = True
 
                     if result["success"]:
                         # JSX'te hata veren siparişler kuyrukta kalır
