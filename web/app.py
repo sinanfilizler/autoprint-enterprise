@@ -5,6 +5,7 @@ from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
+from collections import Counter
 import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -667,6 +668,9 @@ with tab_queue:
         st.subheader("Sipariş Kuyruğu")
     with col_refresh:
         if st.button("🔄 Yenile"):
+            # Sheet'e elle eklenen satırlar 2dk cache yüzünden görünmüyordu
+            if sc and hasattr(sc, "clear_queue_cache"):
+                sc.clear_queue_cache()
             st.rerun()
 
     if not sc:
@@ -684,6 +688,15 @@ with tab_queue:
             unknown = [o["sku"] for o in orders if detect_product_type(o.get("sku","")) == "unknown"]
             if unknown:
                 st.warning(f"⚠️ Template bulunamayan SKU'lar (işlenmeyecek): {', '.join(set(unknown))}")
+            _id_counts = Counter(str(o.get("order_item_id", "")) for o in orders)
+            dup_ids = [i for i, c in _id_counts.items() if c > 1]
+            if dup_ids:
+                st.warning(
+                    f"⚠️ {len(dup_ids)} Order Item ID kuyrukta birden fazla satırda var "
+                    f"({sum(_id_counts[i] for i in dup_ids)} satır). Sheet'te satır kopyalarken "
+                    "order_item_id'nin her satırda farklı olması gerekir; aynı ID'li satırlardan biri "
+                    "işlenince hepsi Log'a taşınır."
+                )
             st.divider()
 
             col_send, col_dry = st.columns(2)

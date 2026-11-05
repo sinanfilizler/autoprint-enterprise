@@ -279,6 +279,11 @@ class SheetsClient:
             "skipped_ids": skipped_ids,
         }
 
+    def clear_queue_cache(self) -> None:
+        """Sheet'e elle yazılan satırların hemen görünmesi için kuyruk cache'ini siler."""
+        self._cache.pop("queue", None)
+        self._cache.pop("row_counts", None)
+
     def get_queue(self) -> list[dict]:
         """Queue sheet'indeki tüm aktif siparişleri döner (2dk cache)."""
         cached = self._cache.get("queue")
