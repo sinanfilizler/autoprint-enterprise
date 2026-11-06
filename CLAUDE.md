@@ -25,6 +25,10 @@ Mevcut masaüstü sistem (PyQt5) tamamen yedekte, bu proje sıfırdan inşa edil
   vehicles2... her SKU'ya). Kategori = sondaki sayı atılmış ID. Sheet'teki tüm ürünler aynı
   kategorideyse dosya <kategori><sheet sırası>.pdf (vehicles1.pdf, vehicles2.pdf; içindeki ID'lerden
   bağımsız). Karışık kategori ya da otomatik/Amazon/REPL ID'si varsa eski usul sheet_NN_<shape>.pdf.
+- Allstar-Regular fontu VersaWorks'te sorun çıkarıyor, PDF'e girmeden outline'a çevrilmeli:
+  PDF modunda Render_Sheet.jsx bunu otomatik yapar (outlineAllstar). Elle düzeltilen .ai için
+  scripts/illustrator/Save_PDF_Roland.jsx: kaydet → Allstar outline → aynı adla PDF → .ai'yi
+  outline'sız tekrar aç. Illustrator Scripts klasörüne (root sahipli) elle kopyalanmalı.
 - Adobe Illustrator — osascript ile JSX tetikleme
 - Illustrator JSX komutu: osascript -e 'tell application "Adobe Illustrator" ...'
 - osascript timeout: 3600 saniye (büyük batch'ler için gerekli)
