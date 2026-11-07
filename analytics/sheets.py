@@ -131,7 +131,7 @@ class SheetsClient:
             ws = self._spreadsheet.add_worksheet(
                 title=name, rows=10000, cols=len(columns)
             )
-            ws.append_row(columns, value_input_option="RAW")
+            ws.append_row(columns, value_input_option="RAW", table_range="A1")
         return ws
 
     def _migrate_headers(self, ws: gspread.Worksheet, expected: list[str]) -> None:
@@ -269,7 +269,7 @@ class SheetsClient:
                 existing.add(oid)
 
         if rows_to_add:
-            self._queue.append_rows(rows_to_add, value_input_option="RAW")
+            self._queue.append_rows(rows_to_add, value_input_option="RAW", table_range="A1")
             self._cache.pop("queue", None)
             self._cache.pop("row_counts", None)
 
@@ -346,7 +346,7 @@ class SheetsClient:
             return {"moved": 0, "not_found": list(oids)}
 
         # 1 write: batch log append
-        self._log.append_rows(log_rows_to_add, value_input_option="RAW")
+        self._log.append_rows(log_rows_to_add, value_input_option="RAW", table_range="A1")
 
         # 1 write: tüm silmeleri tek batch_update isteğine topla
         # Yüksek satırdan başla → düşük satıra git (index kayması önlemi)
@@ -513,7 +513,7 @@ class SheetsClient:
                 self._cache.pop("costs", None)
                 return
 
-        self._costs.append_row([sku, str(cost)], value_input_option="RAW")
+        self._costs.append_row([sku, str(cost)], value_input_option="RAW", table_range="A1")
         self._cache.pop("costs", None)
 
     # ── Replacements API ─────────────────────────────────────────────────────
@@ -535,12 +535,12 @@ class SheetsClient:
         b64 = base64.b64encode(pdf_bytes).decode("utf-8")
         chunks = [b64[i : i + _CHUNK_SIZE] for i in range(0, len(b64), _CHUNK_SIZE)]
         chunk_rows = [[rid, str(idx), chunk] for idx, chunk in enumerate(chunks)]
-        self._replacement_labels.append_rows(chunk_rows, value_input_option="RAW")
+        self._replacement_labels.append_rows(chunk_rows, value_input_option="RAW", table_range="A1")
 
         row_data = dict(data)
         row_data["label_chunk_count"] = str(len(chunks))
         row = [str(row_data.get(col, "")) for col in REPLACEMENTS_COLUMNS]
-        self._replacements.append_row(row, value_input_option="RAW")
+        self._replacements.append_row(row, value_input_option="RAW", table_range="A1")
 
     def get_replacement_label(self, replacement_id: str) -> bytes | None:
         """
@@ -684,7 +684,7 @@ class SheetsClient:
                     self._partners.update_cell(i, active_col + 1, "TRUE")
                     self._cache.pop("partners", None)
                     return
-        self._partners.append_row([pid, pname, "TRUE", now], value_input_option="RAW")
+        self._partners.append_row([pid, pname, "TRUE", now], value_input_option="RAW", table_range="A1")
         self._cache.pop("partners", None)
 
     def deactivate_partner(self, partner_id: str) -> bool:
@@ -768,7 +768,7 @@ class SheetsClient:
                     self._sku_names.update_cell(i, name_col + 1, product_name.strip())
                     self._cache = {k: v for k, v in self._cache.items() if not k.startswith("sku_names")}
                     return
-        self._sku_names.append_row([pid, sku, product_name.strip()], value_input_option="RAW")
+        self._sku_names.append_row([pid, sku, product_name.strip()], value_input_option="RAW", table_range="A1")
         self._cache = {k: v for k, v in self._cache.items() if not k.startswith("sku_names")}
 
     def delete_sku_name(self, partner_id: str, sku: str) -> bool:
