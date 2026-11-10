@@ -17,18 +17,11 @@ var AP_FIT = (function () {
         "BLUE": { r: 0, g: 3, b: 216 }
     };
 
-    // MAX artık üst sınır: boyut outline ölçümüyle doğrudan hesaplanıyor.
     var SIZES = {
-        NAME:    { max: 120, min: 8, margin: 0.99 },
-        YEAR:    { max: 80,  min: 8, margin: 0.99 },
-        MESSAGE: { max: 80,  min: 8, margin: 0.99 }
+        NAME:    { max: 54, min: 8, margin: 0.99 },
+        YEAR:    { max: 32, min: 8, margin: 0.99 },
+        MESSAGE: { max: 36, min: 8, margin: 0.99 }
     };
-
-    // Font bazlı boyut çarpanı (PostScript adı → çarpan). Yoksa 1.0.
-    // Örn. { "Allstar-Regular": 0.95 }
-    var FONT_FIT_ADJUST = {};
-
-    var MEASURE_SIZE = 100;  // ölçüm bu boyutta yapılır, sonra orantıyla ölçeklenir
 
     function cleanText(t) {
         if(!t) return "";
@@ -41,42 +34,22 @@ var AP_FIT = (function () {
             .replace(/[“”]/g,'"');
     }
 
-    // Eski frame ölçümü — sadece outline ölçümü başarısız olursa kullanılır.
-    function frameMeasure(tf) {
+    // Asıl ölçüm: metin kutusunun (frame) width/height'ı — eskiden beri kullanılan.
+    // Okunamaz ya da 0/NaN dönerse yedek olarak geometricBounds kullanılır (fb=true).
+    function measure(tf) {
         try {
             var w = tf.width, h = tf.height;
-            if (w > 0 && h > 0 && !isNaN(w) && !isNaN(h)) return { w: w, h: h };
+            if (w > 0 && h > 0 && !isNaN(w) && !isNaN(h)) return { w: w, h: h, fb: false };
         } catch (e) {}
-        return null;
-    }
-
-    // Görünen şeklin ölçüsü: kopyayı outline'a çevir, sınırlarını oku, sil.
-    // Başarısızsa ya da 0 dönerse null.
-    function outlineMeasure(tf) {
-        var dup = null, g = null;
         try {
-            dup = tf.duplicate();
-            g = dup.createOutline(); dup = null;  // createOutline kopyanın yerine geçer
-            var b = g.geometricBounds;            // [left, top, right, bottom]
-            g.remove(); g = null;
-            var w = b[2] - b[0], h = b[1] - b[3];
-            if (!(w > 0 && h > 0) || isNaN(w) || isNaN(h)) return null;
-            return { w: w, h: h, cx: (b[0] + b[2]) / 2, cy: (b[1] + b[3]) / 2, bounds: b };
-        } catch (e) {
-            try { if (g) g.remove(); } catch (x) {}
-            try { if (dup) dup.remove(); } catch (x2) {}
-            return null;
-        }
+            var g = tf.geometricBounds;
+            return { w: g[2] - g[0], h: g[1] - g[3], fb: true };
+        } catch (e2) {}
+        return { w: 0, h: 0, fb: true };
     }
-
-    function clamp(v, lo, hi) { return v < lo ? lo : (v > hi ? hi : v); }
 
     // Metni kutuya sığdırır. Metin boşsa ya da alan template'te yoksa null döner,
-    // yoksa fit kaydı: {field, font, requestedFont, size, max, min, ratio, hitMin, overflow, fallback}
-    //   1. boyut 100pt → görünen şekil outline ile ölçülür
-    //   2. boyut = 100 * min(kutuW*margin/w, kutuH*margin/h) * font çarpanı, MIN..MAX arası
-    //   3. tekrar ölçülür, görünen şeklin merkezi kutunun merkezine taşınır (yatay + dikey)
-    //   Outline ölçümü başarısızsa eski frame döngüsüne düşer (fallback=true).
+    // yoksa fit kaydı döner: {field, font, requestedFont, size, max, min, ratio, hitMin, overflow, fallback}
     function fitText(doc, tfName, bName, txt, font, sz, min, margin, colorCode) {
         var tf, b;
         try { tf = doc.textFrames.getByName(tfName); } catch (e) { return null; }
@@ -91,46 +64,19 @@ var AP_FIT = (function () {
 
         var cfg = COLOR_CONFIG[colorCode] || COLOR_CONFIG["BLACK"];
         var fill = new RGBColor(); fill.red = cfg.r; fill.green = cfg.g; fill.blue = cfg.b;
-        ch.fillColor = fill;
+        ch.fillColor = fill; ch.size = sz;
+
+        var usedFallback = false;
+        var m = measure(tf); if (m.fb) usedFallback = true;
+        while ((m.w > b.width * margin || m.h > b.height * margin) && ch.size > min) {
+            ch.size -= 0.5;
+            m = measure(tf); if (m.fb) usedFallback = true;
+        }
+        tf.position = [b.left + (b.width - m.w) / 2, tf.position[1]];
 
         var actualFont = "";
         try { actualFont = ch.textFont.name; } catch (e) {}
-        var adj = FONT_FIT_ADJUST.hasOwnProperty(actualFont) ? FONT_FIT_ADJUST[actualFont] : 1.0;
-
-        var bw = b.width, bh = b.height;
-        var bcx = b.left + bw / 2, bcy = b.top - bh / 2;
-        var usedFallback = false, overflow = false, size;
-
-        ch.size = MEASURE_SIZE;
-        var m = outlineMeasure(tf);
-        if (m) {
-            var scale = Math.min(bw * margin / m.w, bh * margin / m.h);
-            size = clamp(Math.floor(MEASURE_SIZE * scale * adj * 10) / 10, min, sz);
-            ch.size = size;
-            var m2 = outlineMeasure(tf);
-            if (m2) {
-                tf.translate(bcx - m2.cx, bcy - m2.cy);
-                overflow = (m2.w > bw * margin + 0.5 || m2.h > bh * margin + 0.5);
-            } else {
-                usedFallback = true;
-            }
-        } else {
-            usedFallback = true;
-        }
-
-        if (usedFallback) {
-            // Eski davranış: frame ölçüsüyle 0.5pt adımlarla küçült, yatayda ortala
-            ch.size = sz;
-            var f = frameMeasure(tf) || { w: 0, h: 0 };
-            while ((f.w > bw * margin || f.h > bh * margin) && ch.size > min) {
-                ch.size -= 0.5;
-                f = frameMeasure(tf) || { w: 0, h: 0 };
-            }
-            tf.position = [b.left + (bw - f.w) / 2, tf.position[1]];
-            size = ch.size;
-            overflow = (f.w > bw * margin || f.h > bh * margin);
-        }
-
+        var size = ch.size;
         return {
             field: tfName,
             font: actualFont,
@@ -140,12 +86,12 @@ var AP_FIT = (function () {
             min: min,
             ratio: sz ? size / sz : 0,
             hitMin: size <= min,
-            overflow: overflow,
+            overflow: (m.w > b.width * margin || m.h > b.height * margin),
             fallback: usedFallback
         };
     }
 
-    // Raporlanması gereken durum mu? (MIN'e indi, hâlâ taşıyor, outline ölçümü fallback'e düştü)
+    // Raporlanması gereken durum mu? (MIN'e indi, hâlâ taşıyor, yedek ölçüm)
     function isProblem(r) {
         return !!r && (r.hitMin || r.overflow || r.fallback);
     }
@@ -154,7 +100,7 @@ var AP_FIT = (function () {
         var p = [];
         if (r.hitMin) p.push("MIN'e indi");
         if (r.overflow) p.push("taşıyor");
-        if (r.fallback) p.push("outline ölçümü başarısız, frame ölçümü kullanıldı");
+        if (r.fallback) p.push("yedek ölçüm");
         return p.join("; ");
     }
 
@@ -162,8 +108,7 @@ var AP_FIT = (function () {
         COLOR_CONFIG: COLOR_CONFIG,
         SIZES: SIZES,
         cleanText: cleanText,
-        FONT_FIT_ADJUST: FONT_FIT_ADJUST,
-        outlineMeasure: outlineMeasure,
+        measure: measure,
         fitText: fitText,
         isProblem: isProblem,
         problemReason: problemReason

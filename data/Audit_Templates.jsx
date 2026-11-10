@@ -153,7 +153,7 @@ if (typeof AUDIT_OVERRIDES !== "undefined") {
         var rf = File(OUT.fsName + "/audit_report.csv"); var isNew = !rf.exists;
         rf.encoding = "UTF-8"; rf.lineFeed = "Unix";
         if (rf.open(isNew ? "w" : "a")) {
-            if (isNew) rf.writeln("sku,audit_font,field,font,final_size,max_size,hit_min,still_overflows,outline_fallback,reason");
+            if (isNew) rf.writeln("sku,audit_font,field,font,final_size,max_size,hit_min,still_overflows,fallback_measure,reason");
             for (var z = 0; z < problems.length; z++) rf.writeln(problems[z]);
             rf.close();
         }

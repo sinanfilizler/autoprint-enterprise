@@ -193,7 +193,7 @@
         if(!probs.length) return;  // sorun yoksa dosya oluşturma
         var f=File(folder.fsName+"/fit_report.csv"); var isNew=!f.exists;
         f.encoding="UTF-8"; f.lineFeed="Unix"; if(!f.open(isNew?"w":"a")) return;
-        if(isNew) f.writeln("sheet,sku,order_item_id,field,font,final_size,max_size,ratio_pct,hit_min,still_overflows,outline_fallback,reason");
+        if(isNew) f.writeln("sheet,sku,order_item_id,field,font,final_size,max_size,ratio_pct,hit_min,still_overflows,fallback_measure,reason");
         for(var j=0;j<probs.length;j++){ var r=probs[j], x=r.fit;
             f.writeln(csvRow([sheetName, r.sku, r.oid, x.field, x.font, x.size, x.max, Math.round(x.ratio*100),
                 x.hitMin?"YES":"", x.overflow?"YES":"", x.fallback?"YES":"", AP_FIT.problemReason(x)]));
