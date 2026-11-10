@@ -36,12 +36,18 @@ Mevcut masaüstü sistem (PyQt5) tamamen yedekte, bu proje sıfırdan inşa edil
 ## Fit Raporu ve Template Denetimi
 - fitText + renkler + font boyutları data/FitText.jsxinc'te (AP_FIT). Render_Sheet.jsx ve
   Audit_Templates.jsx bunu $.evalFile ile yükler — fit kuralını değiştirirken sadece orayı düzenle.
-- Render: sorunlu yerleşimler (MIN'e indi / MAX'ın %50 altı / yedek ölçüm) batch klasöründe
-  fit_report.csv'ye yazılır; sorun yoksa dosya oluşmaz. Ölçüm hep frame (tf.width/height);
-  "yedek ölçüm" sadece o okunamazsa geometricBounds'a düşüldüğünde işaretlenir.
+- Ölçüm OUTLINE ile: metin 100pt yazılır, kopyası createOutline ile ölçülüp silinir,
+  boyut = 100 * min(kutuW*0.99/w, kutuH*0.99/h) * FONT_FIT_ADJUST[font] (MIN..MAX arası),
+  sonra görünen şeklin merkezi kutunun merkezine taşınır (yatay + dikey).
+  Outline ölçümü başarısızsa eski frame döngüsüne düşer ("fallback").
+  MAX: isim 120, yıl 80, mesaj 80 (üst sınır; pratikte kutu belirler). MIN 8.
+- Render: batch klasöründe fit_report.csv — sadece MIN'e inen, hâlâ taşan veya fallback'e düşen
+  alanlar; sorun yoksa dosya oluşmaz.
 - data/Audit_Templates.jsx: ayarlar dosyanın üstünde (TEMPLATE_FOLDER, AUDIT_FONTS, START_INDEX,
-  BATCH_SIZE=40). data/audit/<SKU>_<font>.png + audit_report.csv. Template'ler DONOTSAVECHANGES ile kapanır.
+  BATCH_SIZE=40). data/audit_skus.txt varsa sadece o SKU'lar. Metin alanı/kutusu olmayan template
+  "atlandı". Çıktı data/audit/<SKU>_<font>.png + audit_report.csv. Template'ler DONOTSAVECHANGES ile kapanır.
 - tools/contact_sheet.py: data/audit PNG'lerini 5x6 kontak sayfası PDF'ine çevirir.
+- Git: data/ ignore'da, sadece data/*.jsx ve data/*.jsxinc takip edilir (.bak, batches, audit, orders.json hariç).
 
 ## Ürün Tipleri ve SKU Mantığı
 Ürün tipi SKU'dan değil template klasör yapısından belirlenir:

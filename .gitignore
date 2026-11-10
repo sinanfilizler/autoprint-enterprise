@@ -1,5 +1,8 @@
 .env
-data/
+# data/: çalışma verisi ignore; sadece kod dosyaları (JSX) takip edilir
+data/*
+!data/*.jsx
+!data/*.jsxinc
 __pycache__/
 *.pyc
 .DS_Store
