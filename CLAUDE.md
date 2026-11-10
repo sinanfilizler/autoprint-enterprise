@@ -33,6 +33,16 @@ Mevcut masaüstü sistem (PyQt5) tamamen yedekte, bu proje sıfırdan inşa edil
 - Illustrator JSX komutu: osascript -e 'tell application "Adobe Illustrator" ...'
 - osascript timeout: 3600 saniye (büyük batch'ler için gerekli)
 
+## Fit Raporu ve Template Denetimi
+- fitText + renkler + font boyutları data/FitText.jsxinc'te (AP_FIT). Render_Sheet.jsx ve
+  Audit_Templates.jsx bunu $.evalFile ile yükler — fit kuralını değiştirirken sadece orayı düzenle.
+- Render: sorunlu yerleşimler (MIN'e indi / MAX'ın %50 altı / yedek ölçüm) batch klasöründe
+  fit_report.csv'ye yazılır; sorun yoksa dosya oluşmaz. Ölçüm hep frame (tf.width/height);
+  "yedek ölçüm" sadece o okunamazsa geometricBounds'a düşüldüğünde işaretlenir.
+- data/Audit_Templates.jsx: ayarlar dosyanın üstünde (TEMPLATE_FOLDER, AUDIT_FONTS, START_INDEX,
+  BATCH_SIZE=40). data/audit/<SKU>_<font>.png + audit_report.csv. Template'ler DONOTSAVECHANGES ile kapanır.
+- tools/contact_sheet.py: data/audit PNG'lerini 5x6 kontak sayfası PDF'ine çevirir.
+
 ## Ürün Tipleri ve SKU Mantığı
 Ürün tipi SKU'dan değil template klasör yapısından belirlenir:
 1. ACRY2 ile başlayan SKU → dog_round (kesin kural, klasöre bakılmaz)
