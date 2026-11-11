@@ -20,6 +20,7 @@ from core.parse_utils import parse_uploaded_files, apply_sku_fonts
 from listing_approval import render_listing_approval
 from replacement import render_replacement, _FONT_OPTIONS as REPL_FONT_OPTIONS, _COLOR_OPTIONS as REPL_COLOR_OPTIONS
 from partner_upload import render_partner_upload
+from crmc_package import render_crmc_package
 
 st.set_page_config(
     page_title="AutoPrint Enterprise",
@@ -28,6 +29,10 @@ st.set_page_config(
 )
 
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
+
+# Ana Mac'teki local Streamlit mi? (cloud Linux'ta çalışır). CRMC Paket gibi ağ paylaşımına
+# bağlı sekmeler sadece local'de görünür; gerekirse AUTOPRINT_LOCAL=0/1 ile zorlanır.
+IS_LOCAL = os.getenv("AUTOPRINT_LOCAL", "1" if sys.platform == "darwin" else "0") == "1"
 
 st.markdown("""
 <style>
@@ -435,9 +440,12 @@ if "last_result" in st.session_state:
             st.code(r["stderr"], language=None)
 
 if authenticated:
-    tab_upload, tab_partner, tab_queue, tab_dashboard, tab_admin, tab_listing, tab_replacement = st.tabs(
-        ["📤 Yükle", "🤝 Partner", "📋 Kuyruk", "📊 Dashboard", "⚙️ Admin", "📝 Listing Onay", "🔄 Replacement"]
-    )
+    _tab_names = ["📤 Yükle", "🤝 Partner", "📋 Kuyruk", "📊 Dashboard", "⚙️ Admin", "📝 Listing Onay", "🔄 Replacement"]
+    if IS_LOCAL:
+        _tab_names.append("📦 CRMC Paket")
+    _tabs = st.tabs(_tab_names)
+    tab_upload, tab_partner, tab_queue, tab_dashboard, tab_admin, tab_listing, tab_replacement = _tabs[:7]
+    tab_crmc = _tabs[7] if IS_LOCAL else None
 else:
     tab_upload, tab_partner, tab_listing, tab_replacement = st.tabs(
         ["📤 Yükle", "🤝 Partner", "📝 Listing Onay", "🔄 Replacement"]
@@ -661,6 +669,10 @@ with tab_replacement:
 # ──────────────────────────────────────────────────────────────────────────────
 if not authenticated:
     st.stop()
+
+if tab_crmc is not None:
+    with tab_crmc:
+        render_crmc_package(sc)
 
 with tab_queue:
     col_title, col_refresh = st.columns([4, 1])

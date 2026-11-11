@@ -8,3 +8,6 @@ __pycache__/
 .DS_Store
 credentials.json
 .streamlit/secrets.toml
+# CRMC: gerçek müşteri ZIP'leri / çıktıları (adres içerir) asla commit edilmez
+tests/local_samples/
+CRMC_*.pdf

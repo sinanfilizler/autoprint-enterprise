@@ -8,7 +8,8 @@ Mevcut masaüstü sistem (PyQt5) tamamen yedekte, bu proje sıfırdan inşa edil
 ## Mimari
 - web/         : Streamlit web paneli (dosya yükleme, sipariş kuyruğu, dashboard)
 - core/        : AmazonParser + JSX tetikleyici (mevcut mantık buraya taşınacak)
-- agent/       : macOS'ta çalışan local watchdog (buluttan polling + Illustrator tetik)
+- agent/       : macOS'ta çalışan local watchdog (buluttan polling). Illustrator'ı kullanıcı elle
+                 başlatır, otomatik tetikleme yok (bkz. "CRMC / Workstation akışı")
 - analytics/   : TACOS, ciro, SKU kârlılık hesabı
 - fonts/       : Font validasyon ve fallback sistemi
 - data/        : Runtime JSON dosyaları (gitignore'da)
@@ -96,7 +97,7 @@ Board: 24x16 inç (pt cinsinden: 1728x1152)
 Round/Heart/Dog: spacing=0.025*72pt, side_margin=0.5*72pt
 Snowglobe: spacing=0.005*72pt, side_margin=0.05*72pt (4x7=28 adet sığar)
 
-## Klasör Yapısı Referansı (Mevcut Sistem)
+## Klasör Yapısı Referansı (Eski AutoPrint, yedek: dokunulmaz, şablonlar hâlâ buradan okunur)
 ~/Desktop/AutoPrint/
 ├── input/parsed_orders/orders.json
 ├── batches/YYYY-MM-DD_HHMM/
@@ -117,3 +118,30 @@ Faz 4: Dinamik font desteği
 
 ## Teknoloji
 Streamlit, Render/Railway free tier, Google Sheets API (gspread), Python watchdog, python-dotenv
+
+## CRMC / Workstation akışı
+- Eski AutoPrint (~/Desktop/AutoPrint) yedek olarak kalır, ona dokunulmaz. Şablonlar hâlâ oradan okunur.
+- Sheet hazırlama akışı değişmez: kullanıcı Amazon packing slip'lerini yükler, kuyruk ve baskı
+  sheet'leri bugünkü gibi oluşur. Illustrator'ı kullanıcı elle başlatır, otomatik tetikleme yok.
+- Workstation paneli (holiday-treasures.sreforce.com/workstation, ekran WS-2) paketleri ZIP olarak
+  indirmek için kullanılır. Sürekli açık bir Windows makinesinde Tampermonkey script'i
+  (tools/workstation_crm_batch.user.js) paketleri sırayla Accept, Download, Finish yapar.
+  Reject ve "Send for Admin Review" butonlarına ASLA dokunulmaz.
+- ZIP'ler C:\CRMC_Inbox paylaşımına iner, ana Mac'te /Volumes/CRMC_Inbox olarak görünür
+  (.env: CRMC_INBOX_PATH).
+- Her ZIP'te slips.pdf var: sipariş başına bir blok. Label'lı sayfa blok başlatır; label'sız sayfa
+  (görsel yok, aynı order ID) taşan devam sayfasıdır. SVG dosyaları kullanılmaz.
+- SKU önekleri (.env: CRMC_SKU_PREFIXES, varsayılan crm,acry): paket en az bir listedeki SKU
+  içeriyorsa işlenir. Listede olmayan SKU'lu bloklar PDF'in sonunda "DİĞER SKU'LU BLOKLAR"
+  bölümüne gider.
+- "CRMC Paket" sekmesi sadece local Streamlit'te çalışır, PDF'i SKU'ya göre sıralar, sayfaların sol
+  altına sıra damgası basar. Kullanıcı baskı sheet'leriyle elle eşler. Gerçek müşteri ZIP'leri
+  git'e eklenmez.
+- Kod: core/crmc_packages.py (tarama, bloklama, sıralama, damgalı PDF), web/crmc_package.py (sekme).
+  Sekme sadece IS_LOCAL iken görünür (web/app.py: macOS = local, AUTOPRINT_LOCAL=0/1 ile zorlanır).
+  Basılan bloklar data/crmc_printed.json (anahtar: order_id|paket_id), sadece "Basıldı olarak
+  işaretle" onayıyla yazılır. Damga: "<run_id> · #037 · 1/2" (+ " · DİĞER"), 100 blokta bir dosya.
+- Testler: python3 -m unittest tests.test_crmc_packages (sentetik PDF'ler, tests/crmc_fixtures.py).
+  Gerçek ZIP'ler için tests/local_samples/ (gitignore'lu) + python3 tests/crmc_smoke.py [--pdf].
+- Kullanıcı Türkçe konuşur; kodda ve arayüzde mevcut İngilizce/Türkçe karışık stile uy.
+  Cevaplarda em dash kullanma.
