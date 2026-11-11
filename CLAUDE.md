@@ -142,12 +142,14 @@ Streamlit, Render/Railway free tier, Google Sheets API (gspread), Python watchdo
   Basılan bloklar data/crmc_printed.json (anahtar: order_id|paket_id), sadece "Basıldı olarak
   işaretle" onayıyla yazılır. Damga: "<run_id> · #037 · 1/2" (+ " · DİĞER"), 100 blokta bir dosya.
 - ROUND/HEART: şekil TEMPLATE_BASE (~/Desktop/AutoPrint/templates, sadece okunur) klasörlerinden:
-  round_ceramic → ROUND, heart_ceramic → HEART (<SKU>_template.ai, harf duyarsız, uzantısız). İki
-  klasörde birden = çakışma (UNKNOWN). Klasörde yoksa slip başlığındaki "round"/"heart" (başlıktan
-  tahmin), yoksa UNKNOWN. data/crmc_shapes.json elle atama, klasörü ezer. Blok: ROUND/HEART/MIXED/
-  UNKNOWN (sadece listedeki SKU'lar bakılır). PDF sırası ROUND, HEART, MIXED, ?, sonra DİĞER.
-  "Sadece ROUND/HEART" kapsamında MIXED, ? ve sadece yabancı SKU'lu bloklar hep girer; basıldı
-  işareti sadece PDF'e giren bloklara. Damga sonuna R/H/MIX/? (MIX: "R: ... | H: ...").
+  round_ceramic → ROUND, heart_ceramic → HEART, snowglobe → SNOWGLOBE (<SKU>_template.ai, harf duyarsız, uzantısız). İki
+  klasörde birden = çakışma (UNKNOWN). Klasörde yoksa başlıktaki "round"/"heart"/"snowglobe" (başlıktan
+  tahmin), yoksa UNKNOWN. data/crmc_shapes.json elle atama, klasörü ezer. Blok: ROUND/HEART/
+  SNOWGLOBE/MIXED (birden çok şekil)/UNKNOWN (sadece listedeki SKU'lar bakılır). PDF sırası ROUND,
+  HEART, MIXED, SNOWGLOBE, ?, sonra DİĞER (yabancı SKU içeren blok şekli ne olursa olsun DİĞER'de
+  kalır, kullanıcı kararı). "Sadece ROUND/HEART" kapsamında MIXED, SNOWGLOBE, ? ve sadece yabancı
+  SKU'lu bloklar hep girer; basıldı işareti sadece PDF'e giren bloklara. Damga sonuna R/H/SG/MIX/?
+  (MIX: "R: ... | H: ...").
 - Testler: python3 -m unittest tests.test_crmc_packages (sentetik PDF'ler, tests/crmc_fixtures.py).
   Gerçek ZIP'ler için tests/local_samples/ (gitignore'lu) + python3 tests/crmc_smoke.py [--pdf].
 - Kullanıcı Türkçe konuşur; kodda ve arayüzde mevcut İngilizce/Türkçe karışık stile uy.

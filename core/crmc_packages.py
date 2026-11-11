@@ -354,10 +354,11 @@ def scan_inbox(path: Path | str | None = None, prefixes: tuple[str, ...] | None 
 # ── Şekil (ROUND / HEART) ─────────────────────────────────────────────────────
 # Kaynak: AutoPrint template klasörleri (sadece okunur). <SKU>_template.ai veya <SKU>.ai.
 
-ROUND, HEART, MIXED, UNKNOWN = "ROUND", "HEART", "MIXED", "UNKNOWN"
-SHAPE_FOLDERS = {"round_ceramic": ROUND, "heart_ceramic": HEART}
-SHAPE_ORDER = {ROUND: 0, HEART: 1, MIXED: 2, UNKNOWN: 3, None: 4}
-SHAPE_LABEL = {ROUND: "R", HEART: "H", MIXED: "MIX", UNKNOWN: "?"}
+ROUND, HEART, SNOWGLOBE, MIXED, UNKNOWN = "ROUND", "HEART", "SNOWGLOBE", "MIXED", "UNKNOWN"
+SKU_SHAPES = (ROUND, HEART, SNOWGLOBE)          # tek SKU'nun alabileceği şekiller (elle atama dahil)
+SHAPE_FOLDERS = {"round_ceramic": ROUND, "heart_ceramic": HEART, "snowglobe": SNOWGLOBE}
+SHAPE_ORDER = {ROUND: 0, HEART: 1, MIXED: 2, SNOWGLOBE: 3, UNKNOWN: 4, None: 5}
+SHAPE_LABEL = {ROUND: "R", HEART: "H", SNOWGLOBE: "SG", MIXED: "MIX", UNKNOWN: "?"}
 SCOPES = {"all": "Hepsi", ROUND: "Sadece ROUND", HEART: "Sadece HEART"}
 _TEMPLATE_SUFFIX_RE = re.compile(r"_template.*$", re.IGNORECASE)
 
@@ -402,7 +403,7 @@ class SkuShape:
 def resolve_sku_shape(sku: str, title: str, index: dict[str, set[str]], manual: dict[str, str]) -> SkuShape:
     """Elle atama > template klasörü > slip başlığı ('başlıktan tahmin'). İki klasörde birden = çakışma."""
     key = sku.strip().lower()
-    if manual.get(key) in (ROUND, HEART):
+    if manual.get(key) in SKU_SHAPES:
         return SkuShape(manual[key], "elle")
     folders = index.get(key, set())
     shapes = sorted({SHAPE_FOLDERS[f] for f in folders if f in SHAPE_FOLDERS})
@@ -411,7 +412,8 @@ def resolve_sku_shape(sku: str, title: str, index: dict[str, set[str]], manual: 
     if shapes:
         return SkuShape(shapes[0], "klasör")
     t = (title or "").lower()
-    guesses = [sh for sh, word in ((ROUND, "round"), (HEART, "heart")) if re.search(rf"\b{word}\b", t)]
+    guesses = [sh for sh, word in ((ROUND, r"round"), (HEART, r"heart"), (SNOWGLOBE, r"snow\s?globe"))
+               if re.search(rf"\b{word}\b", t)]
     if len(guesses) == 1:
         return SkuShape(guesses[0], "başlık", title)
     other = ", ".join(sorted(folders))
@@ -422,7 +424,7 @@ def assign_shapes(blocks: list[Block], prefixes: tuple[str, ...], index: dict[st
                   manual: dict[str, str]) -> dict[str, SkuShape]:
     """
     Her bloğa şekil sınıfı atar (sadece listedeki SKU'lar bakılır, yabancılar sınıfı etkilemez):
-    UNKNOWN (en az biri belirsiz) > MIXED (round + heart) > ROUND / HEART.
+    UNKNOWN (en az biri belirsiz) > MIXED (birden çok şekil) > ROUND / HEART / SNOWGLOBE.
     Dönüş: {sku: SkuShape} (sekmedeki şekil kaynakları tablosu için).
     """
     seen: dict[str, SkuShape] = {}
@@ -450,7 +452,7 @@ def assign_shapes(blocks: list[Block], prefixes: tuple[str, ...], index: dict[st
 
 
 def select_blocks(blocks: list[Block], scope: str) -> list[Block]:
-    """'Sadece ROUND/HEART': karşı şekil dışarıda kalır; MIXED, UNKNOWN ve şekilsiz bloklar her zaman girer."""
+    """'Sadece ROUND/HEART': karşı şekil dışarıda kalır; MIXED, SNOWGLOBE, UNKNOWN ve şekilsiz bloklar hep girer."""
     if scope not in (ROUND, HEART):
         return list(blocks)
     return [b for b in blocks if b.shape not in (ROUND, HEART) or b.shape == scope]
@@ -461,13 +463,13 @@ def load_manual_shapes(path: Path | None = None) -> dict[str, str]:
         data = json.loads(Path(path or SHAPES_FILE).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
-    return {str(k).lower(): v for k, v in data.items() if v in (ROUND, HEART)}
+    return {str(k).lower(): v for k, v in data.items() if v in SKU_SHAPES}
 
 
 def save_manual_shapes(shapes: dict[str, str], path: Path | None = None) -> None:
     path = Path(path or SHAPES_FILE)
     path.parent.mkdir(parents=True, exist_ok=True)
-    clean = {k.lower(): v for k, v in sorted(shapes.items()) if v in (ROUND, HEART)}
+    clean = {k.lower(): v for k, v in sorted(shapes.items()) if v in SKU_SHAPES}
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(clean, ensure_ascii=False, indent=1), encoding="utf-8")
     tmp.replace(path)
@@ -477,11 +479,11 @@ def save_manual_shapes(shapes: dict[str, str], path: Path | None = None) -> None
 
 def sort_blocks(blocks: list[Block]) -> list[Block]:
     """
-    Normal bloklar şekil bölümüne göre (ROUND, HEART, MIXED, UNKNOWN), bölüm içinde SKU (doğal)
+    Normal bloklar şekil bölümüne göre (ROUND, HEART, MIXED, SNOWGLOBE, UNKNOWN), bölüm içinde SKU (doğal)
     + order_id; 'diğer' bloklar aynı SKU kuralıyla en sonda. Şekil atanmadıysa sadece SKU sırası.
     """
     def k(b: Block):
-        section = 0 if b.is_other else SHAPE_ORDER.get(b.shape, 4) if b.shape else 0
+        section = 0 if b.is_other else SHAPE_ORDER.get(b.shape, 5) if b.shape else 0
         return (b.is_other, section, natural_key(b.first_sku), b.order_id or "", b.package_id, b.pages[0])
     return sorted(blocks, key=k)
 
@@ -575,7 +577,7 @@ def stamp_text(run_id: str, num: int, page_no: int, block: Block) -> str:
         text += f" · {SHAPE_LABEL[block.shape]}"
         if block.shape == MIXED:
             text += " " + " | ".join(f"{SHAPE_LABEL[sh]}: {', '.join(block.shape_skus[sh])}"
-                                     for sh in (ROUND, HEART) if block.shape_skus.get(sh))
+                                     for sh in SKU_SHAPES if block.shape_skus.get(sh))
     if block.is_other:
         text += " · DİĞER"
     return text
@@ -618,7 +620,7 @@ def summary_rows(blocks: list[Block]) -> list[dict]:
 def _section_ranges(blocks: list[Block]) -> list[str]:
     """Sıralı bloklarda bölüm aralıkları: 'ROUND 12 blok (#001-#012)'."""
     out, start, cur = [], 0, None
-    names = {ROUND: "ROUND", HEART: "HEART", MIXED: "MIXED", UNKNOWN: "ŞEKLİ BELİRSİZ (?)"}
+    names = {ROUND: "ROUND", HEART: "HEART", MIXED: "MIXED", SNOWGLOBE: "SNOWGLOBE", UNKNOWN: "ŞEKLİ BELİRSİZ (?)"}
     def label(b):
         return OTHER_LABEL if b.is_other else names.get(b.shape)
     for i, b in enumerate(blocks + [None]):

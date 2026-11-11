@@ -300,7 +300,10 @@ class ShapeTests(unittest.TestCase):
         self.assertEqual((r("crmc9", "Big Heart Ornament").shape, r("crmc9", "Big Heart Ornament").source),
                          ("HEART", "başlık"))
         self.assertEqual(r("crmc9", "Round Heart").shape, "UNKNOWN")          # ikisi birden: tahmin yok
-        self.assertEqual((r("acry1414").shape, r("acry1414").detail), ("UNKNOWN", "snowglobe klasöründe"))
+        self.assertEqual((r("acry1414").shape, r("acry1414").source), ("SNOWGLOBE", "klasör"))
+        self.assertEqual((r("acry9", "HIGHLAND COW IN SNOWGLOBE").shape, r("acry9", "Cow Snow Globe").source),
+                         ("SNOWGLOBE", "başlık"))
+        self.assertEqual(r("acry9", "Ornament").detail, "template yok")
         self.assertEqual(r("crmc77", manual={"crmc77": "HEART"}).source, "elle")   # elle çakışmayı ezer
         self.assertEqual(r("CRMC1", manual={"crmc1": "HEART"}).shape, "HEART")     # elle klasörü ezer
 
@@ -389,12 +392,30 @@ class ShapeTests(unittest.TestCase):
         left = [b.order_id for b in blocks if b.key not in printed]
         self.assertEqual(sorted(left), sorted([OID[1], OID[5]]))   # HEART'lar basılmamış kaldı
 
+    def test_snowglobe_class(self):
+        blocks, _, slips = shaped_blocks([
+            page(OID[0], item("acry1414")),                          # SNOWGLOBE
+            page(OID[1], item("crmc1") + item("acry1414")),          # round + snowglobe → MIXED
+            page(OID[2], item("crm1228")),                           # HEART
+            page(OID[3], item("crmc999")),                           # UNKNOWN
+            page(OID[4], item("crmc1")),                             # ROUND
+        ])
+        self.assertEqual([b.shape for b in blocks], ["SNOWGLOBE", "MIXED", "HEART", "UNKNOWN", "ROUND"])
+        self.assertEqual([b.shape for b in cp.sort_blocks(blocks)], ["ROUND", "HEART", "MIXED", "SNOWGLOBE", "UNKNOWN"])
+        self.assertEqual(cp.stamp_text("R1", 1, 1, blocks[0]), "R1 · #001 · 1/1 · SG")
+        self.assertEqual(cp.stamp_text("R1", 2, 1, blocks[1]), "R1 · #002 · 1/1 · MIX R: crmc1 | SG: acry1414")
+        for scope in ("ROUND", "HEART"):                             # her kapsamda girer
+            self.assertIn(OID[0], [b.order_id for b in cp.select_blocks(blocks, scope)])
+        files = cp.build_pdfs(blocks, {"pkg": slips}, "R1")
+        summary = (PdfReader(io.BytesIO(files[0][1])).pages[0].extract_text() or "")
+        self.assertIn("SNOWGLOBE: 1 blok (#004-#004)", summary)
+
     def test_manual_shapes_file(self):
         with tempfile.TemporaryDirectory() as d:
             pf = Path(d) / "shapes.json"
             self.assertEqual(cp.load_manual_shapes(pf), {})
-            cp.save_manual_shapes({"ACRY1414": "ROUND", "x": "BAD"}, pf)
-            self.assertEqual(cp.load_manual_shapes(pf), {"acry1414": "ROUND"})
+            cp.save_manual_shapes({"ACRY1414": "ROUND", "acry9": "SNOWGLOBE", "x": "BAD"}, pf)
+            self.assertEqual(cp.load_manual_shapes(pf), {"acry1414": "ROUND", "acry9": "SNOWGLOBE"})
 
 
 if __name__ == "__main__":

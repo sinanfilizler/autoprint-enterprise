@@ -103,10 +103,11 @@ def render_crmc_package(sc) -> None:
     m4.metric("Uyarı", len(warnings))
     if index is not None:
         cnt = Counter(b.shape for b in candidates)
-        s1, s2, s3, s4 = st.columns(4)
+        s1, s2, s3, s5, s4 = st.columns(5)
         s1.metric("ROUND", cnt[cp.ROUND])
         s2.metric("HEART", cnt[cp.HEART])
         s3.metric("MIXED", cnt[cp.MIXED])
+        s5.metric("SNOWGLOBE", cnt[cp.SNOWGLOBE])
         s4.metric("? (belirsiz)", cnt[cp.UNKNOWN])
         _render_shape_sources(candidates, sku_shapes)
 
@@ -130,7 +131,7 @@ def render_crmc_package(sc) -> None:
     if index is not None:
         scope = st.radio("Kapsam", list(cp.SCOPES), format_func=cp.SCOPES.get, horizontal=True,
                          key="crmc_scope",
-                         help="MIXED, şekli belirsiz ve sadece yabancı SKU'lu bloklar her seçimde PDF'e girer.")
+                         help="MIXED, SNOWGLOBE, şekli belirsiz ve sadece yabancı SKU'lu bloklar her seçimde PDF'e girer.")
     selected = cp.select_blocks(candidates, scope)
 
     st.markdown(f"**Bloklar** (# = PDF sırası, — = bu kapsamda PDF'e girmez; {len(selected)}/{len(candidates)} blok)")
@@ -182,7 +183,7 @@ def _render_shape_sources(candidates, sku_shapes) -> None:
         st.caption("Elle atama data/crmc_shapes.json'a yazılır ve klasör sonucunu ezer. "
                    "'—' seçmek elle atamayı kaldırır.")
         manual = cp.load_manual_shapes()
-        options = ["—", cp.ROUND, cp.HEART]
+        options = ["—", *cp.SKU_SHAPES]
         with st.form("crmc_shape_form"):
             picks = {}
             cols = st.columns(3)
