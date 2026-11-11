@@ -32,7 +32,8 @@ BLOCKS_PER_FILE = 100
 OTHER_LABEL = "DİĞER SKU'LU BLOKLAR"
 
 _ORDER_RE = re.compile(r"\b\d{3}-\d{7}-\d{7}\b")
-_ITEM_RE = re.compile(r"^\s*(\S+)\s*-\s*\(\s*QTY\s*:\s*(\d+)\s*\)\s*-?\s*(.*)$", re.IGNORECASE)
+# Adet 1'den büyükse panel yıldızla vurgular: "(QTY: *2*)"
+_ITEM_RE = re.compile(r"^\s*(\S+)\s*-\s*\(\s*QTY\s*:\s*\**\s*(\d+)\s*\**\s*\)\s*-?\s*(.*)$", re.IGNORECASE)
 # "N. ANAHTAR: değer"; aynı satırda birden çok alan olabilir: "1. NAME: Quin 2. YEAR: 2026"
 _FIELD_RE = re.compile(r"(?:^|(?<=\s))(\d+)\.\s*([A-Z][A-Z0-9 /&'()-]*?)\s*:\s*")
 _CHROME_SUFFIX_RE = re.compile(r"\s*\(\d+\)$")

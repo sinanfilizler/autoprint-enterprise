@@ -83,6 +83,11 @@ class ParseTests(unittest.TestCase):
         it = parse([page(OID[0], lines)])[0][0].items[0]
         self.assertEqual(it.fields, {"NAME": "QUIN RYAN", "YEAR": "2026", "GIFT BOX": "Yes, add gift box."})
 
+    def test_starred_qty(self):
+        lines = ["crmc2385 - (QTY: *2*) - Colombia", "1. NAME: Ana 2. YEAR: 2026"]
+        it = parse([page(OID[0], lines)])[0][0].items[0]
+        self.assertEqual((it.sku, it.qty, it.title, it.fields["NAME"]), ("crmc2385", 2, "Colombia", "Ana"))
+
     def test_other_prefix_skus(self):
         blocks, _ = parse([page(OID[0], item("PO-1234") + item("GX55"))])
         self.assertEqual(blocks[0].skus, ["PO-1234", "GX55"])
