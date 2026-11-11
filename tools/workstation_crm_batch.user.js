@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Workstation CRM Toplu Isleme
 // @namespace    autoprint
-// @version      1.1
+// @version      1.2
 // @description  Listedeki SKU oneklerinden en az birini iceren paketleri sirayla Accept, Download, Finish yapar
 // @match        https://*.sreforce.com/workstation*
 // @match        https://*.sreforce.com/login*
@@ -17,6 +17,8 @@
   var INTERVAL_DEFAULT = 5;      // otomatik mod kontrol araligi (dk)
   var REFRESH_DEFAULT = 15;      // otomatik modda sayfa yenileme araligi (dk)
   var MAX_ERRORS = 3;            // ardisik bu kadar hatali turda otomatik mod kapanir
+  var ACCEPT_TRIES = 3;          // Accept onay penceresi icin deneme sayisi
+  var NEXT_DELAY = 5000;         // Finish sonrasi bir sonraki Accept'ten once bekleme
   var LS = 'crmBatch.';
   var state = { running: false, stop: false, zips: [] };
 
@@ -130,6 +132,64 @@
       return b.getAttribute('aria-label') || '';
     });
     return ids.find(function (a) { return /---/.test(a); }) || '';
+  }
+
+  // Bekleyen kart, indeks yerine paket kimligiyle (yoksa SKU listesiyle) taze olarak bulunur
+  function findPending(id, want) {
+    return pendingCards().find(function (c) {
+      return c && (id ? pkgIdOf(c) === id : skusOf(c).join(',') === want);
+    }) || null;
+  }
+
+  // Finish sonrasi panel listeyi yeniden cizer: kart sayisi ve Accept referanslari 1.5 sn
+  // degismeyene kadar bekle (en fazla 15 sn)
+  async function waitListSettled() {
+    function snap() { return Array.prototype.slice.call(document.querySelectorAll('button[aria-label="Accept"]')); }
+    var t0 = Date.now(), last = snap(), stableSince = Date.now();
+    while (Date.now() - t0 < 15000) {
+      await sleep(250);
+      var now = snap();
+      var same = now.length === last.length && now.every(function (b, i) { return b === last[i]; });
+      if (!same) { last = now; stableSince = Date.now(); }
+      else if (Date.now() - stableSince >= 1500) return true;
+    }
+    return false;
+  }
+
+  function labelsOf(nodes) {
+    return Array.prototype.map.call(nodes, function (b) { return b.getAttribute('aria-label') || b.textContent.trim().replace(/\s+/g, ' '); });
+  }
+
+  // Tani: Accept sonrasi sayfadaki dialog/mask sayisi ve bulunan dugmeler
+  function acceptDiag(card, id, want, attempt) {
+    var fresh = findPending(id, want);
+    var dlgs = document.querySelectorAll('.p-dialog, .p-confirm-dialog, .p-dialog-mask, .p-component-overlay, [role="dialog"], [role="alertdialog"]');
+    var dlgBtns = [];
+    Array.prototype.forEach.call(dlgs, function (d) { dlgBtns = dlgBtns.concat(labelsOf(d.querySelectorAll('button'))); });
+    return 'deneme ' + attempt + '/' + ACCEPT_TRIES + ', dialog/mask: ' + dlgs.length +
+      ', dialog dugmeleri: [' + dlgBtns.join(', ') + ']' +
+      ', tiklanan kart DOM da: ' + (card && card.isConnected ? 'evet' : 'hayir (liste yeniden cizilmis)') +
+      ', kart dugmeleri: [' + (fresh ? labelsOf(fresh.querySelectorAll('button')).join(', ') : 'kart bulunamadi') + ']';
+  }
+
+  // Accept + onay penceresi, en fazla ACCEPT_TRIES deneme. Hedef her denemede taze bulunur.
+  async function acceptWithRetry(id, want) {
+    var diag = '';
+    for (var attempt = 1; attempt <= ACCEPT_TRIES; attempt++) {
+      if (currentCard()) {
+        return { fail: true, msg: 'Accept oncesi beklenmeyen acik paket (mavi kart) var. Dokunulmadi, elle kontrol et.' };
+      }
+      var card = findPending(id, want);
+      var a = card && btn(card, 'Accept');
+      if (!a) return { gone: true };
+      a.click();
+      var y = await waitFor(yesButton, 6000);
+      if (y) return { yes: y };
+      diag = acceptDiag(card, id, want, attempt);
+      say('Accept onay penceresi cikmadi (' + diag + ')');
+      if (attempt < ACCEPT_TRIES) await sleep(2000);
+    }
+    return { fail: true, msg: 'Accept onay penceresi cikmadi, ' + ACCEPT_TRIES + ' deneme basarisiz. Tani: ' + diag };
   }
 
   function hhmm(t) {
@@ -271,16 +331,18 @@
   bStop.onclick = function () { state.stop = true; say('Durdurma istendi, mevcut paket bitince duracak.'); };
 
   // ---- Tek paket: Accept (+onay) -> Download (ZIP sinyali) -> Finish (+onay) ----
-  async function processOne() {
-    var cards = pendingCards().filter(isEligible);
+  async function processOne(skipIds) {
+    var cards = pendingCards().filter(function (c) { return isEligible(c) && skipIds.indexOf(pkgIdOf(c) || skusOf(c).join(',')) === -1; });
     if (!cards.length) return { done: true, msg: 'Islenecek paket kalmadi.' };
     var target = cards[0];
+    var id = pkgIdOf(target);
     var want = skusOf(target).join(',');
     var other = hasOther(target);
 
-    btn(target, 'Accept').click();
-    var y1 = await waitFor(yesButton, 10000);
-    if (!y1) return { fail: true, msg: 'Accept onay penceresi cikmadi.' };
+    var acc = await acceptWithRetry(id, want);
+    if (acc.gone) return { skip: id || want, msg: 'Paket bulunamadi (baskasi almis veya kaybolmus olabilir), sonrakine geciliyor: ' + (id || want) };
+    if (acc.fail) return acc;
+    var y1 = acc.yes;
     y1.click();
 
     var cur = await waitFor(currentCard, 15000);
@@ -327,14 +389,19 @@
     var okCount = 0, failed = '';
     say('Basladi: en fazla ' + toDo + ' paket.');
     try {
+      var skipIds = [];
       while (okCount < toDo && !state.stop) {
-        var r = await processOne();
+        var r = await processOne(skipIds);
         if (r.done) { say(r.msg); break; }
         if (r.fail) { failed = r.msg; say('HATA: ' + r.msg); break; }
+        if (r.skip) { skipIds.push(r.skip); say(r.msg); continue; }
         okCount++;
         stats.total++; stats.lastOkAt = Date.now(); saveStats();
         say(okCount + '/' + toDo + '  ' + r.msg + (r.other ? '  (dikkat: diger SKU iceriyor)' : ''));
-        await sleep(2000);
+        if (okCount < toDo && !state.stop) {
+          await sleep(NEXT_DELAY);
+          if (!(await waitListSettled())) say('Kart listesi 15 sn icinde yerlesmedi, yine de devam ediliyor.');
+        }
       }
     } catch (err) {
       failed = 'Beklenmeyen hata: ' + err;

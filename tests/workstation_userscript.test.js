@@ -7,7 +7,8 @@ const fs = require('fs');
 const path = require('path');
 const { JSDOM, VirtualConsole } = require('jsdom');
 
-const SRC = fs.readFileSync(path.join(__dirname, '..', 'tools', 'workstation_crm_batch.user.js'), 'utf8');
+const SRC = fs.readFileSync(process.env.USERSCRIPT_PATH ||
+  path.join(__dirname, '..', 'tools', 'workstation_crm_batch.user.js'), 'utf8');
 const WS = 'https://holiday-treasures.sreforce.com/workstation';
 
 function card(skus, pkg) {
@@ -40,10 +41,16 @@ const savedCfg = (w) => JSON.parse(w.localStorage.getItem('crmBatch.cfg'));
 
 // Paneli taklit eder: Accept -> Yes -> mavi kart (Download/Finish) -> ZIP -> Finish -> Yes -> kart kapanir.
 // Tiklanan tum aria-label'lari kaydeder.
-function simulatePanel(w, { swapSkusTo } = {}) {
+//   busyAfterFinishMs: Finish sonrasi panel bu sure listeyi yeniden cizer; bu arada Accept tiklamalari bosa gider
+//   ignoreAccepts:     ilk N Accept tiklamasi onay penceresi acmaz ve listeyi yeniden cizer (eski referanslar duser)
+//   vanishOnAccept:    bu SKU'lu kartin Accept'i karti listeden siler (baskasi aldi), pencere acilmaz
+function simulatePanel(w, { swapSkusTo, busyAfterFinishMs = 0, ignoreAccepts = 0, vanishOnAccept } = {}) {
   const d = w.document;
   const clicks = [];
   let pending = null;
+  let busyUntil = 0;
+  let ignored = 0;
+  const rerender = () => { const l = d.getElementById('list'); if (l) l.innerHTML = l.innerHTML; };
   const dialog = (onYes) => {
     const dlg = d.createElement('div');
     dlg.className = 'p-confirm-dialog';
@@ -58,6 +65,9 @@ function simulatePanel(w, { swapSkusTo } = {}) {
     clicks.push(label);
     const c = b.closest('.p-card');
     if (label === 'Accept') {
+      if (Date.now() < busyUntil) return;
+      if (vanishOnAccept && c.textContent.includes(vanishOnAccept)) { c.remove(); return; }
+      if (ignored < ignoreAccepts) { ignored++; setTimeout(rerender, 100); return; }
       dialog(() => {
         c.classList.add('bg-blue-50');
         c.querySelectorAll('[aria-label="Accept"],[aria-label="Reject"]').forEach((x) => x.remove());
@@ -73,7 +83,14 @@ function simulatePanel(w, { swapSkusTo } = {}) {
       a.download = c.querySelector('.p-card-header button').getAttribute('aria-label') + '.zip';
       setTimeout(() => a.click(), 100);
     } else if (label === 'Finish') {
-      dialog(() => c.remove());
+      dialog(() => {
+        c.remove();
+        if (busyAfterFinishMs) {
+          busyUntil = Date.now() + busyAfterFinishMs;
+          setTimeout(rerender, 500);
+          setTimeout(rerender, busyAfterFinishMs);
+        }
+      });
     }
   }, true);
   return clicks;
@@ -184,4 +201,56 @@ test('Accept sonrasi farkli paket acilirsa tur durur, paket acik kalir, Finish e
   assert.ok(w.document.querySelector('.p-card.bg-blue-50'));
   assert.deepStrictEqual(clicks, ['Accept', 'Yes']);   // ikinci pakete gecilmedi
   w.close();
+});
+
+const acceptCount = (clicks) => clicks.filter((c) => c === 'Accept').length;
+
+test('iki paket arka arkaya: Finish sonrasi panel yeniden cizerken ikinci Accept bosa gitmez', async () => {
+  const w = setup({ cards: [card(['crmc1']), card(['crmc2'])] });
+  const clicks = simulatePanel(w, { busyAfterFinishMs: 3500 });
+  const r = await w.__crmBatch.runRound(true);
+  assert.deepStrictEqual(plain(r), { ok: true, count: 2, error: '' });
+  assert.strictEqual(acceptCount(clicks), 2);
+  assert.strictEqual(cards(w).length, 0);
+});
+
+test('Accept 1. denemede pencere acmaz (liste yeniden cizilir), 2. denemede taze kartla basarili', async () => {
+  const w = setup({ cards: [card(['crmc1'])] });
+  const clicks = simulatePanel(w, { ignoreAccepts: 1 });
+  const r = await w.__crmBatch.runRound(true);
+  assert.deepStrictEqual(plain(r), { ok: true, count: 1, error: '' });
+  assert.strictEqual(acceptCount(clicks), 2);
+  assert.match(w.document.body.textContent, /deneme 1\/3/);
+});
+
+test('Accept 3 denemede de pencere acmazsa tani bilgisiyle hata, tur durur, sonraki pakete gecilmez', async () => {
+  const w = setup({ cards: [card(['crmc1']), card(['crmc2'])] });
+  const clicks = simulatePanel(w, { ignoreAccepts: 99 });
+  const logs = [];
+  w.console.log = (...a) => logs.push(a.join(' '));
+  const r = await w.__crmBatch.runRound(true);
+  assert.strictEqual(r.ok, false);
+  assert.match(r.error, /3 deneme basarisiz/);
+  assert.match(r.error, /deneme 3\/3, dialog\/mask: 0, dialog dugmeleri: \[\], tiklanan kart DOM da: hayir.*kart dugmeleri: \[26---.*crmc1, crmc1 Title, Accept, Reject\]/);
+  assert.strictEqual(acceptCount(clicks), 3);
+  assert.deepStrictEqual(plain(clicks), ['Accept', 'Accept', 'Accept']);
+  assert.ok(logs.some((l) => /deneme 3\/3/.test(l)));
+  assert.match(w.__crmBatch.stats.lastError, /3 deneme basarisiz/);
+});
+
+test('hedef paket kaybolursa hata sayilmaz, sonraki uygun pakete gecilir', async () => {
+  const w = setup({ cards: [card(['crmc1']), card(['crmc2'])] });
+  const clicks = simulatePanel(w, { vanishOnAccept: 'crmc1' });
+  const r = await w.__crmBatch.runRound(true);
+  assert.deepStrictEqual(plain(r), { ok: true, count: 1, error: '' });
+  assert.deepStrictEqual(plain(clicks).filter((c) => c !== 'Download the package'), ['Accept', 'Accept', 'Yes', 'Finish', 'Yes']);
+  assert.match(w.document.body.textContent, /Paket bulunamadi/);
+});
+
+test('Accept hatasi otomatik mod hata sayacini artirir', async () => {
+  const w = setup({ cards: [card(['crmc1'])], cfg: { auto: true }, stats: { errors: 2 } });
+  simulatePanel(w, { ignoreAccepts: 99 });
+  await w.__crmBatch.autoTick();
+  assert.strictEqual(w.__crmBatch.stats.errors, 3);
+  assert.strictEqual(w.__crmBatch.cfg.auto, false);
 });
