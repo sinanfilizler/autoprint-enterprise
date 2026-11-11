@@ -77,6 +77,12 @@ class ParseTests(unittest.TestCase):
         self.assertEqual(it.fields["GIFT BOX"], "Yes, add gift box.")
         self.assertTrue(it.gift_box)
 
+    def test_multiple_fields_on_one_line(self):
+        lines = ["crmc1828 - (QTY: 1) - Princess Unicorn", "1. NAME: QUIN RYAN 2. YEAR: 2026",
+                 "3. GIFT BOX: Yes, add gift", "box."]
+        it = parse([page(OID[0], lines)])[0][0].items[0]
+        self.assertEqual(it.fields, {"NAME": "QUIN RYAN", "YEAR": "2026", "GIFT BOX": "Yes, add gift box."})
+
     def test_other_prefix_skus(self):
         blocks, _ = parse([page(OID[0], item("PO-1234") + item("GX55"))])
         self.assertEqual(blocks[0].skus, ["PO-1234", "GX55"])

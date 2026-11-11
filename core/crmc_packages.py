@@ -32,7 +32,8 @@ OTHER_LABEL = "DİĞER SKU'LU BLOKLAR"
 
 _ORDER_RE = re.compile(r"\b\d{3}-\d{7}-\d{7}\b")
 _ITEM_RE = re.compile(r"^\s*(\S+)\s*-\s*\(\s*QTY\s*:\s*(\d+)\s*\)\s*-?\s*(.*)$", re.IGNORECASE)
-_FIELD_RE = re.compile(r"^\s*(\d+)\.\s*([A-Za-z][A-Za-z0-9 /&'()-]*?)\s*:\s*(.*)$")
+# "N. ANAHTAR: değer"; aynı satırda birden çok alan olabilir: "1. NAME: Quin 2. YEAR: 2026"
+_FIELD_RE = re.compile(r"(?:^|(?<=\s))(\d+)\.\s*([A-Z][A-Z0-9 /&'()-]*?)\s*:\s*")
 _CHROME_SUFFIX_RE = re.compile(r"\s*\(\d+\)$")
 _ZIP_DATE_RE = re.compile(r"^(\d{2})---(\d{2})\.(\d{2})---(\d{2})\.(\d{2})")
 _NUM_SPLIT_RE = re.compile(r"(\d+)")
@@ -200,10 +201,11 @@ def _parse_items(pages_lines: list[list[dict]]) -> list[Item]:
                 items.append(item)
                 target = ("title", item)
                 continue
-            f = _FIELD_RE.match(text)
-            if f and items:
-                key = f.group(2).strip().upper()
-                items[-1].fields[key] = f.group(3).strip()
+            fields = list(_FIELD_RE.finditer(text))
+            if fields and fields[0].start() == 0 and items:
+                for f, nxt in zip(fields, fields[1:] + [None]):
+                    key = f.group(2).strip()
+                    items[-1].fields[key] = text[f.end():nxt.start() if nxt else None].strip()
                 target = ("field", items[-1], key)
                 continue
             if target and close:
