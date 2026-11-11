@@ -15,11 +15,17 @@ import streamlit as st
 from core import crmc_packages as cp
 
 
-def _block_rows(blocks, printed) -> pd.DataFrame:
+_SOURCE_LABEL = {"elle": "elle atandı", "başlık": "başlıktan tahmin", "çakışma": "çakışma (iki klasörde)",
+                 "yok": "bulunamadı", "klasör": "klasör"}
+
+
+def _block_rows(blocks, selected, printed) -> pd.DataFrame:
+    pdf_no = {id(b): n for n, b in enumerate(cp.sort_blocks(selected), 1)}
     rows = []
-    for n, b in enumerate(cp.sort_blocks(blocks), 1):
+    for b in cp.sort_blocks(blocks):
         rows.append({
-            "#": n,
+            "#": f"{pdf_no[id(b)]:03d}" if id(b) in pdf_no else "—",
+            "Şekil": cp.SHAPE_LABEL.get(b.shape, ""),
             "Bölüm": "DİĞER" if b.is_other else "",
             "SKU": ", ".join(b.skus) or "?",
             "Adet": sum(i.qty for i in b.items),
@@ -41,6 +47,8 @@ def render_crmc_package(sc) -> None:
     if st.button("🔄 Inbox'ı Tara", key="crmc_scan_btn") or "crmc_scan" not in st.session_state:
         with st.spinner("Inbox taranıyor..."):
             st.session_state["crmc_scan"] = cp.scan_inbox(path, prefixes)
+            # Template klasörü sadece okunur; ROUND/HEART ayrımı buradan gelir
+            st.session_state["crmc_tpl_index"] = cp.build_template_index()
         st.session_state.pop("crmc_outputs", None)
     res: cp.ScanResult = st.session_state["crmc_scan"]
 
@@ -77,11 +85,30 @@ def render_crmc_package(sc) -> None:
     if not queue_note:
         warnings += cp.queue_warnings(res.blocks, candidates, queue, prefixes)
 
+    # ── ROUND / HEART ──
+    index = st.session_state.get("crmc_tpl_index")
+    sku_shapes = {}
+    if index is None:
+        for b in res.blocks:
+            b.shape, b.shape_skus = None, {}
+        st.warning(f"Template klasörü okunamadı ({cp.template_base()}), ROUND/HEART ayrımı kapalı. "
+                   "Sadece SKU sırası kullanılıyor.")
+    else:
+        sku_shapes = cp.assign_shapes(res.blocks, prefixes, index, cp.load_manual_shapes())
+
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("Blok", len(candidates))
     m2.metric("Sayfa", sum(b.page_count for b in candidates))
     m3.metric("Diğer SKU'lu blok", sum(b.is_other for b in candidates))
     m4.metric("Uyarı", len(warnings))
+    if index is not None:
+        cnt = Counter(b.shape for b in candidates)
+        s1, s2, s3, s4 = st.columns(4)
+        s1.metric("ROUND", cnt[cp.ROUND])
+        s2.metric("HEART", cnt[cp.HEART])
+        s3.metric("MIXED", cnt[cp.MIXED])
+        s4.metric("? (belirsiz)", cnt[cp.UNKNOWN])
+        _render_shape_sources(candidates, sku_shapes)
 
     if queue_note:
         st.info(queue_note)
@@ -99,21 +126,31 @@ def render_crmc_package(sc) -> None:
         st.info("Basılacak yeni blok yok." if res.blocks else "Inbox'ta işlenecek paket yok.")
         return
 
-    st.markdown("**Bloklar** (PDF sırası; DİĞER bölümü en sonda)")
-    st.dataframe(_block_rows(candidates, printed), use_container_width=True, hide_index=True)
+    scope = "all"
+    if index is not None:
+        scope = st.radio("Kapsam", list(cp.SCOPES), format_func=cp.SCOPES.get, horizontal=True,
+                         key="crmc_scope",
+                         help="MIXED, şekli belirsiz ve sadece yabancı SKU'lu bloklar her seçimde PDF'e girer.")
+    selected = cp.select_blocks(candidates, scope)
 
-    if st.button("📄 PDF Oluştur", type="primary", key="crmc_build"):
+    st.markdown(f"**Bloklar** (# = PDF sırası, — = bu kapsamda PDF'e girmez; {len(selected)}/{len(candidates)} blok)")
+    st.dataframe(_block_rows(candidates, selected, printed), use_container_width=True, hide_index=True)
+
+    if st.button("📄 PDF Oluştur", type="primary", key="crmc_build", disabled=not selected):
         run_id = cp.new_run_id()
         slips = {p.package_id: p.slips for p in res.packages if p.package_id in shown_pkgs}
         with st.spinner("PDF hazırlanıyor..."):
-            files = cp.build_pdfs(candidates, slips, run_id, dict(Counter(w["tür"] for w in warnings)))
+            files = cp.build_pdfs(selected, slips, run_id, dict(Counter(w["tür"] for w in warnings)),
+                                  scope_label=cp.SCOPES[scope] if index is not None else "")
+        # "Basıldı" işareti sadece bu PDF'e giren bloklar için
         st.session_state["crmc_outputs"] = {
-            "run_id": run_id, "files": files, "keys": [b.key for b in candidates],
+            "run_id": run_id, "files": files, "keys": [b.key for b in selected], "scope": cp.SCOPES[scope],
         }
 
     out = st.session_state.get("crmc_outputs")
     if out:
-        st.success(f"Çalıştırma {out['run_id']}: {len(out['keys'])} blok, {len(out['files'])} dosya.")
+        st.success(f"Çalıştırma {out['run_id']} ({out.get('scope', 'Hepsi')}): "
+                   f"{len(out['keys'])} blok, {len(out['files'])} dosya.")
         for name, data in out["files"]:
             st.download_button(f"⬇️ {name}", data, file_name=name, mime="application/pdf",
                                key=f"crmc_dl_{name}")
@@ -125,3 +162,38 @@ def render_crmc_package(sc) -> None:
             st.session_state.pop("crmc_confirm", None)
             st.success(f"{n} blok basıldı olarak kaydedildi.")
             st.rerun()
+
+
+def _render_shape_sources(candidates, sku_shapes) -> None:
+    """Klasörden gelmeyen şekiller: başlıktan tahmin, elle atanan, çakışma, bulunamayan. Elle atama formu."""
+    in_scan = {i.sku.lower() for b in candidates for i in b.items}
+    rows = [(sku, sh) for sku, sh in sorted(sku_shapes.items(), key=lambda x: cp.natural_key(x[0]))
+            if sku in in_scan and sh.source != "klasör"]
+    unresolved = [sku for sku, sh in rows if sh.shape == cp.UNKNOWN]
+    if unresolved:
+        st.warning(f"Şekli belirsiz SKU'lar ({len(unresolved)}): {', '.join(unresolved)}")
+    if not rows:
+        return
+    with st.expander(f"Şekil kaynakları: klasör dışı ({len(rows)} SKU)", expanded=bool(unresolved)):
+        st.dataframe(pd.DataFrame([{
+            "SKU": sku, "Şekil": cp.SHAPE_LABEL.get(sh.shape, ""),
+            "Kaynak": _SOURCE_LABEL.get(sh.source, sh.source), "Ayrıntı": sh.detail,
+        } for sku, sh in rows]), use_container_width=True, hide_index=True)
+        st.caption("Elle atama data/crmc_shapes.json'a yazılır ve klasör sonucunu ezer. "
+                   "'—' seçmek elle atamayı kaldırır.")
+        manual = cp.load_manual_shapes()
+        options = ["—", cp.ROUND, cp.HEART]
+        with st.form("crmc_shape_form"):
+            picks = {}
+            cols = st.columns(3)
+            for i, (sku, sh) in enumerate(rows):
+                cur = manual.get(sku, "—")
+                picks[sku] = cols[i % 3].selectbox(sku, options, index=options.index(cur), key=f"crmc_shape_{sku}")
+            if st.form_submit_button("💾 Şekilleri kaydet"):
+                for sku, val in picks.items():
+                    if val == "—":
+                        manual.pop(sku, None)
+                    else:
+                        manual[sku] = val
+                cp.save_manual_shapes(manual)
+                st.rerun()

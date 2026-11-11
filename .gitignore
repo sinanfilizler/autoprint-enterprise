@@ -10,4 +10,5 @@ credentials.json
 .streamlit/secrets.toml
 # CRMC: gerçek müşteri ZIP'leri / çıktıları (adres içerir) asla commit edilmez
 tests/local_samples/
+data/crmc_shapes.json
 CRMC_*.pdf

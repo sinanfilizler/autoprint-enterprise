@@ -253,5 +253,149 @@ class BuildPdfTests(unittest.TestCase):
         self.assertIn("#210 · 1/1 · DİĞER", self._texts(files[2][1])[-1])
 
 
+def make_templates(spec: dict[str, list[str]]) -> tempfile.TemporaryDirectory:
+    """{"round_ceramic": ["CRMC1_template.ai", ...], ...} şeklinde geçici template kökü."""
+    d = tempfile.TemporaryDirectory()
+    for folder, files in spec.items():
+        (Path(d.name) / folder).mkdir()
+        for f in files:
+            (Path(d.name) / folder / f).write_bytes(b"")
+    return d
+
+
+TEMPLATES = {
+    "round_ceramic": ["CRMC1_template.ai", "CRMC1714 _template.ai", "crmc20.ai", "CRMC77_template.ai"],
+    "heart_ceramic": ["CRM1228_template.ai", "CRMC1222_template.ai", "CRMC77_template.ai"],
+    "snowglobe": ["ACRY1414_template.ai"],
+}
+
+
+def shaped_blocks(pages, manual=None, prefixes=PREFIXES):
+    slips = slips_pdf(pages)
+    blocks, _ = cp.parse_slips(slips, "pkg", "pkg.zip")
+    for b in blocks:
+        b.is_other = not all(cp.is_listed_sku(s, prefixes) for s in b.skus)
+    with make_templates(TEMPLATES) as d:
+        index = cp.build_template_index(d)
+    shapes = cp.assign_shapes(blocks, prefixes, index, manual or {})
+    return blocks, shapes, slips
+
+
+class ShapeTests(unittest.TestCase):
+    def test_template_index_names(self):
+        with make_templates(TEMPLATES) as d:
+            idx = cp.build_template_index(d)
+        self.assertEqual(idx["crmc1714"], {"round_ceramic"})        # "CRMC1714 _template.ai"
+        self.assertEqual(idx["crmc20"], {"round_ceramic"})          # uzantısız eşleşme
+        self.assertEqual(idx["crmc77"], {"round_ceramic", "heart_ceramic"})
+        self.assertIsNone(cp.build_template_index("/nonexistent/templates"))
+
+    def test_resolve_sources(self):
+        with make_templates(TEMPLATES) as d:
+            idx = cp.build_template_index(d)
+        r = lambda sku, title="Ornament", manual=None: cp.resolve_sku_shape(sku, title, idx, manual or {})
+        self.assertEqual((r("CRMC1").shape, r("CRMC1").source), ("ROUND", "klasör"))
+        self.assertEqual((r("crm1228").shape, r("crm1228").source), ("HEART", "klasör"))
+        self.assertEqual((r("crmc77").shape, r("crmc77").source), ("UNKNOWN", "çakışma"))
+        self.assertEqual((r("crmc9", "Big Heart Ornament").shape, r("crmc9", "Big Heart Ornament").source),
+                         ("HEART", "başlık"))
+        self.assertEqual(r("crmc9", "Round Heart").shape, "UNKNOWN")          # ikisi birden: tahmin yok
+        self.assertEqual((r("acry1414").shape, r("acry1414").detail), ("UNKNOWN", "snowglobe klasöründe"))
+        self.assertEqual(r("crmc77", manual={"crmc77": "HEART"}).source, "elle")   # elle çakışmayı ezer
+        self.assertEqual(r("CRMC1", manual={"crmc1": "HEART"}).shape, "HEART")     # elle klasörü ezer
+
+    def test_block_classes(self):
+        blocks, _, _ = shaped_blocks([
+            page(OID[0], item("crmc1") + item("crmc20")),            # round + round
+            page(OID[1], item("crm1228") + item("crmc1222")),        # heart + heart
+            page(OID[2], item("crmc1") + item("crm1228")),           # round + heart
+            page(OID[3], item("crmc1") + item("crmc999")),           # round + belirsiz
+            page(OID[4], item("crmc77")),                            # çakışma
+            page(OID[5], item("crmc1") + item("GX55")),              # yabancı SKU sınıfı etkilemez
+        ])
+        self.assertEqual([b.shape for b in blocks], ["ROUND", "HEART", "MIXED", "UNKNOWN", "UNKNOWN", "ROUND"])
+        self.assertEqual(blocks[2].shape_skus, {"ROUND": ["crmc1"], "HEART": ["crm1228"]})
+        self.assertTrue(blocks[5].is_other)
+        only_foreign, _, _ = shaped_blocks([page(OID[0], item("PO-1"))])
+        self.assertIsNone(only_foreign[0].shape)
+
+    def test_sort_sections(self):
+        blocks, _, _ = shaped_blocks([
+            page(OID[0], item("PO-1")),                              # sadece yabancı
+            page(OID[1], item("crmc999")),                           # UNKNOWN
+            page(OID[2], item("crmc1") + item("crm1228")),           # MIXED
+            page(OID[3], item("crmc1222")),                          # HEART
+            page(OID[4], item("crmc20")),                            # ROUND
+            page(OID[5], item("crmc1")),                             # ROUND
+            page("111-0000007-0000007", item("crm1228")),            # HEART
+            page("111-0000008-0000008", item("crmc1") + item("RO-2")),  # ROUND + yabancı → DİĞER
+        ])
+        order = [(b.shape, b.first_sku, b.is_other) for b in cp.sort_blocks(blocks)]
+        self.assertEqual(order, [
+            ("ROUND", "crmc1", False), ("ROUND", "crmc20", False),
+            ("HEART", "crm1228", False), ("HEART", "crmc1222", False),
+            ("MIXED", "crmc1", False), ("UNKNOWN", "crmc999", False),
+            ("ROUND", "crmc1", True), (None, "PO-1", True),
+        ])
+
+    def test_stamp_text(self):
+        blocks, _, _ = shaped_blocks([
+            page(OID[0], item("crmc1")), page(OID[1], item("crm1228")),
+            page(OID[2], item("crmc1") + item("crmc20") + item("crm1228")),
+            page(OID[3], item("crmc999")), page(OID[4], item("crmc1") + item("GX1")), page(OID[5], item("GX2")),
+        ])
+        texts = [cp.stamp_text("R1", 7, 1, b) for b in blocks]
+        self.assertEqual(texts, [
+            "R1 · #007 · 1/1 · R",
+            "R1 · #007 · 1/1 · H",
+            "R1 · #007 · 1/1 · MIX R: crmc1, crmc20 | H: crm1228",
+            "R1 · #007 · 1/1 · ?",
+            "R1 · #007 · 1/1 · R · DİĞER",
+            "R1 · #007 · 1/1 · DİĞER",
+        ])
+
+    def test_partial_pdf_and_printed(self):
+        blocks, _, slips = shaped_blocks([
+            page(OID[0], item("crmc1")),                    # ROUND
+            page(OID[1], item("crm1228")),                  # HEART
+            page(OID[2], item("crmc1") + item("crm1228")),  # MIXED
+            page(OID[3], item("crmc999")),                  # UNKNOWN
+            page(OID[4], item("GX9")),                      # sadece yabancı
+            page(OID[5], item("crmc1222") + item("GX1")),   # HEART + yabancı
+        ])
+        sel = cp.select_blocks(blocks, "ROUND")
+        self.assertEqual(sorted(b.order_id for b in sel), sorted([OID[0], OID[2], OID[3], OID[4]]))
+        self.assertEqual(len(cp.select_blocks(blocks, "all")), 6)
+        heart = cp.select_blocks(blocks, "HEART")
+        self.assertEqual(sorted(b.order_id for b in heart), sorted([OID[1], OID[2], OID[3], OID[4], OID[5]]))
+
+        files = cp.build_pdfs(sel, {"pkg": slips}, "R9", scope_label="Sadece ROUND")
+        texts = [pg.extract_text() or "" for pg in PdfReader(io.BytesIO(files[0][1])).pages]
+        self.assertIn("Kapsam: Sadece ROUND", texts[0])
+        self.assertIn("ROUND: 1 blok (#001-#001)", texts[0])
+        self.assertIn("MIXED: 1 blok (#002-#002)", texts[0])
+        stamps = [t for t in texts[1:] if "R9 · #" in t]
+        self.assertEqual(len(stamps), 4)
+        self.assertIn("#001 · 1/1 · R", stamps[0])
+        self.assertIn("#002 · 1/1 · MIX R: crmc1 | H: crm1228", stamps[1])
+        self.assertIn("#003 · 1/1 · ?", stamps[2])
+        self.assertIn("#004 · 1/1 · DİĞER", stamps[3])
+        self.assertFalse(any(OID[1] in t for t in texts))           # HEART bloğu PDF'te yok
+
+        with tempfile.TemporaryDirectory() as d:
+            pf = Path(d) / "printed.json"
+            cp.mark_printed([b.key for b in sel], "R9", pf)
+            printed = cp.load_printed(pf)
+        left = [b.order_id for b in blocks if b.key not in printed]
+        self.assertEqual(sorted(left), sorted([OID[1], OID[5]]))   # HEART'lar basılmamış kaldı
+
+    def test_manual_shapes_file(self):
+        with tempfile.TemporaryDirectory() as d:
+            pf = Path(d) / "shapes.json"
+            self.assertEqual(cp.load_manual_shapes(pf), {})
+            cp.save_manual_shapes({"ACRY1414": "ROUND", "x": "BAD"}, pf)
+            self.assertEqual(cp.load_manual_shapes(pf), {"acry1414": "ROUND"})
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -23,6 +23,7 @@ from pathlib import Path
 DEFAULT_INBOX = "/Volumes/CRMC_Inbox"
 DEFAULT_PREFIXES = "crm,acry"
 PRINTED_FILE = Path(__file__).parent.parent / "data" / "crmc_printed.json"
+SHAPES_FILE = Path(__file__).parent.parent / "data" / "crmc_shapes.json"   # elle atanan SKU şekilleri
 
 SKIP_SUFFIXES = (".crdownload", ".tmp", ".part")
 MIN_AGE_SEC = 10            # son 10 sn'de değişen ZIP henüz yazılıyor olabilir
@@ -105,6 +106,8 @@ class Block:
     items: list[Item] = field(default_factory=list)
     ambiguous: bool = False          # label'sız sayfadan başlayan blok
     is_other: bool = False           # listede olmayan SKU içeriyor
+    shape: str | None = None         # ROUND/HEART/MIXED/UNKNOWN; None = şekil atanmadı / sadece yabancı SKU
+    shape_skus: dict = field(default_factory=dict)   # {"ROUND": [...], "HEART": [...], "UNKNOWN": [...]}
 
     @property
     def key(self) -> str:
@@ -348,12 +351,138 @@ def scan_inbox(path: Path | str | None = None, prefixes: tuple[str, ...] | None 
     return res
 
 
+# ── Şekil (ROUND / HEART) ─────────────────────────────────────────────────────
+# Kaynak: AutoPrint template klasörleri (sadece okunur). <SKU>_template.ai veya <SKU>.ai.
+
+ROUND, HEART, MIXED, UNKNOWN = "ROUND", "HEART", "MIXED", "UNKNOWN"
+SHAPE_FOLDERS = {"round_ceramic": ROUND, "heart_ceramic": HEART}
+SHAPE_ORDER = {ROUND: 0, HEART: 1, MIXED: 2, UNKNOWN: 3, None: 4}
+SHAPE_LABEL = {ROUND: "R", HEART: "H", MIXED: "MIX", UNKNOWN: "?"}
+SCOPES = {"all": "Hepsi", ROUND: "Sadece ROUND", HEART: "Sadece HEART"}
+_TEMPLATE_SUFFIX_RE = re.compile(r"_template.*$", re.IGNORECASE)
+
+
+def template_base() -> Path:
+    """Sheet akışının kullandığı template kökü (TEMPLATE_BASE, core/jsx_trigger.py)."""
+    from core.jsx_trigger import TEMPLATE_BASE
+    return Path(TEMPLATE_BASE)
+
+
+def template_sku(filename: str) -> str:
+    """'CRMC1714 _template.ai' → 'crmc1714' (uzantısız, büyük/küçük harf duyarsız)."""
+    stem = filename[:-3] if filename.lower().endswith(".ai") else filename
+    return _TEMPLATE_SUFFIX_RE.sub("", stem).strip().lower()
+
+
+def build_template_index(base: Path | str | None = None) -> dict[str, set[str]] | None:
+    """{sku: {klasör adı, ...}}. Template kökü yoksa None (şekil özelliği kapalı)."""
+    base = Path(base) if base else template_base()
+    try:
+        if not base.is_dir():
+            return None
+        index: dict[str, set[str]] = {}
+        for folder in base.iterdir():
+            if not folder.is_dir():
+                continue
+            for f in folder.iterdir():
+                if f.suffix.lower() == ".ai" and not f.name.startswith("."):
+                    index.setdefault(template_sku(f.name), set()).add(folder.name)
+        return index
+    except OSError:
+        return None
+
+
+@dataclass
+class SkuShape:
+    shape: str        # ROUND / HEART / UNKNOWN
+    source: str       # klasör / elle / başlık / çakışma / yok
+    detail: str = ""
+
+
+def resolve_sku_shape(sku: str, title: str, index: dict[str, set[str]], manual: dict[str, str]) -> SkuShape:
+    """Elle atama > template klasörü > slip başlığı ('başlıktan tahmin'). İki klasörde birden = çakışma."""
+    key = sku.strip().lower()
+    if manual.get(key) in (ROUND, HEART):
+        return SkuShape(manual[key], "elle")
+    folders = index.get(key, set())
+    shapes = sorted({SHAPE_FOLDERS[f] for f in folders if f in SHAPE_FOLDERS})
+    if len(shapes) > 1:
+        return SkuShape(UNKNOWN, "çakışma", " + ".join(sorted(f for f in folders if f in SHAPE_FOLDERS)))
+    if shapes:
+        return SkuShape(shapes[0], "klasör")
+    t = (title or "").lower()
+    guesses = [sh for sh, word in ((ROUND, "round"), (HEART, "heart")) if re.search(rf"\b{word}\b", t)]
+    if len(guesses) == 1:
+        return SkuShape(guesses[0], "başlık", title)
+    other = ", ".join(sorted(folders))
+    return SkuShape(UNKNOWN, "yok", f"{other} klasöründe" if other else "template yok")
+
+
+def assign_shapes(blocks: list[Block], prefixes: tuple[str, ...], index: dict[str, set[str]],
+                  manual: dict[str, str]) -> dict[str, SkuShape]:
+    """
+    Her bloğa şekil sınıfı atar (sadece listedeki SKU'lar bakılır, yabancılar sınıfı etkilemez):
+    UNKNOWN (en az biri belirsiz) > MIXED (round + heart) > ROUND / HEART.
+    Dönüş: {sku: SkuShape} (sekmedeki şekil kaynakları tablosu için).
+    """
+    seen: dict[str, SkuShape] = {}
+    for b in blocks:
+        groups: dict[str, list[str]] = {}
+        for it in b.items:
+            if not is_listed_sku(it.sku, prefixes):
+                continue
+            key = it.sku.lower()
+            if key not in seen:
+                seen[key] = resolve_sku_shape(it.sku, it.title, index, manual)
+            lst = groups.setdefault(seen[key].shape, [])
+            if key not in lst:
+                lst.append(key)
+        b.shape_skus = groups
+        if not groups:
+            b.shape = None
+        elif UNKNOWN in groups:
+            b.shape = UNKNOWN
+        elif len(groups) > 1:
+            b.shape = MIXED
+        else:
+            b.shape = next(iter(groups))
+    return seen
+
+
+def select_blocks(blocks: list[Block], scope: str) -> list[Block]:
+    """'Sadece ROUND/HEART': karşı şekil dışarıda kalır; MIXED, UNKNOWN ve şekilsiz bloklar her zaman girer."""
+    if scope not in (ROUND, HEART):
+        return list(blocks)
+    return [b for b in blocks if b.shape not in (ROUND, HEART) or b.shape == scope]
+
+
+def load_manual_shapes(path: Path | None = None) -> dict[str, str]:
+    try:
+        data = json.loads(Path(path or SHAPES_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return {str(k).lower(): v for k, v in data.items() if v in (ROUND, HEART)}
+
+
+def save_manual_shapes(shapes: dict[str, str], path: Path | None = None) -> None:
+    path = Path(path or SHAPES_FILE)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    clean = {k.lower(): v for k, v in sorted(shapes.items()) if v in (ROUND, HEART)}
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(clean, ensure_ascii=False, indent=1), encoding="utf-8")
+    tmp.replace(path)
+
+
 # ── Sıralama ve uyarılar ──────────────────────────────────────────────────────
 
 def sort_blocks(blocks: list[Block]) -> list[Block]:
-    """Normal bloklar SKU (doğal) + order_id; 'diğer' bloklar aynı kuralla en sonda."""
+    """
+    Normal bloklar şekil bölümüne göre (ROUND, HEART, MIXED, UNKNOWN), bölüm içinde SKU (doğal)
+    + order_id; 'diğer' bloklar aynı SKU kuralıyla en sonda. Şekil atanmadıysa sadece SKU sırası.
+    """
     def k(b: Block):
-        return (b.is_other, natural_key(b.first_sku), b.order_id or "", b.package_id, b.pages[0])
+        section = 0 if b.is_other else SHAPE_ORDER.get(b.shape, 4) if b.shape else 0
+        return (b.is_other, section, natural_key(b.first_sku), b.order_id or "", b.package_id, b.pages[0])
     return sorted(blocks, key=k)
 
 
@@ -439,12 +568,30 @@ def _t(text: str) -> str:
     return text if _font()[2] else text.translate(_TR_ASCII)
 
 
+def stamp_text(run_id: str, num: int, page_no: int, block: Block) -> str:
+    """'<run> · #037 · 1/2 · R' ; MIXED: '... · MIX R: crmc1320 | H: crm1228' ; yabancı: '... · DİĞER'"""
+    text = f"{run_id} · #{num:03d} · {page_no}/{block.page_count}"
+    if block.shape:
+        text += f" · {SHAPE_LABEL[block.shape]}"
+        if block.shape == MIXED:
+            text += " " + " | ".join(f"{SHAPE_LABEL[sh]}: {', '.join(block.shape_skus[sh])}"
+                                     for sh in (ROUND, HEART) if block.shape_skus.get(sh))
+    if block.is_other:
+        text += " · DİĞER"
+    return text
+
+
 def _stamp_overlay(text: str, llx: float, lly: float, urx: float, ury: float):
     from pypdf import PdfReader
+    from reportlab.pdfbase.pdfmetrics import stringWidth
     from reportlab.pdfgen import canvas
     buf = io.BytesIO()
     c = canvas.Canvas(buf, pagesize=(urx, ury))
-    c.setFont(_font()[0], 8)
+    # Uzun MIX damgası sayfa genişliğine sığsın diye küçülür (en az 5.5pt)
+    size, room = 8.0, (urx - llx) - 28
+    while size > 5.5 and stringWidth(_t(text), _font()[0], size) > room:
+        size -= 0.5
+    c.setFont(_font()[0], size)
     c.setFillGray(0.25)
     c.drawString(llx + 14, lly + 8, _t(text))
     c.save()
@@ -455,8 +602,10 @@ def summary_rows(blocks: list[Block]) -> list[dict]:
     """SKU bazlı özet: blok sayısı, toplam adet, gift box adedi."""
     rows: dict[str, dict] = {}
     for b in blocks:
+        shape_of = {sku: sh for sh, skus in b.shape_skus.items() for sku in skus}
         for sku in dict.fromkeys(s.lower() for s in b.skus):
-            rows.setdefault(sku, {"sku": sku, "blok": 0, "adet": 0, "gift_box": 0, "diğer": b.is_other})
+            rows.setdefault(sku, {"sku": sku, "blok": 0, "adet": 0, "gift_box": 0, "diğer": b.is_other,
+                                  "şekil": SHAPE_LABEL.get(shape_of.get(sku), "")})
             rows[sku]["blok"] += 1
         for it in b.items:
             r = rows[it.sku.lower()]
@@ -466,7 +615,23 @@ def summary_rows(blocks: list[Block]) -> list[dict]:
     return sorted(rows.values(), key=lambda r: (r["diğer"], natural_key(r["sku"])))
 
 
-def _summary_pages(blocks: list[Block], run_id: str, warn_counts: dict[str, int], n_files: int) -> bytes:
+def _section_ranges(blocks: list[Block]) -> list[str]:
+    """Sıralı bloklarda bölüm aralıkları: 'ROUND 12 blok (#001-#012)'."""
+    out, start, cur = [], 0, None
+    names = {ROUND: "ROUND", HEART: "HEART", MIXED: "MIXED", UNKNOWN: "ŞEKLİ BELİRSİZ (?)"}
+    def label(b):
+        return OTHER_LABEL if b.is_other else names.get(b.shape)
+    for i, b in enumerate(blocks + [None]):
+        lab = label(b) if b else "__end__"
+        if lab != cur:
+            if cur is not None and cur and i > start:
+                out.append(f"{cur}: {i - start} blok (#{start + 1:03d}-#{i:03d})")
+            cur, start = lab, i
+    return out
+
+
+def _summary_pages(blocks: list[Block], run_id: str, warn_counts: dict[str, int], n_files: int,
+                   scope_label: str = "") -> bytes:
     from reportlab.lib.pagesizes import letter, landscape
     from reportlab.pdfgen import canvas
 
@@ -488,17 +653,21 @@ def _summary_pages(blocks: list[Block], run_id: str, warn_counts: dict[str, int]
         y -= size + 5
 
     line(f"CRMC Paket Özeti  ·  {run_id}", 16, bold)
-    line(f"Oluşturma: {datetime.now():%Y-%m-%d %H:%M}  ·  {n_files} dosya", 9)
+    line(f"Oluşturma: {datetime.now():%Y-%m-%d %H:%M}  ·  {n_files} dosya"
+         + (f"  ·  Kapsam: {scope_label}" if scope_label else ""), 9)
     y -= 6
     line(f"Toplam blok: {len(blocks)}    Toplam sayfa: {sum(b.page_count for b in blocks)}    "
          f"Paket: {len({b.package_id for b in blocks})}", 11, bold)
     line(f"{OTHER_LABEL}: {len(others)} blok" + (f"  ({', '.join(other_skus)})" if other_skus else ""), 10)
+    if any(b.shape for b in blocks):
+        for r in _section_ranges(blocks):
+            line(r, 10)
     if warn_counts:
         line("Uyarılar: " + ", ".join(f"{k} {v}" for k, v in warn_counts.items()), 10)
     else:
         line("Uyarı yok.", 10)
     y -= 8
-    cols = [("SKU", 0), ("Blok", 160), ("Adet", 220), ("Gift box", 280), ("", 350)]
+    cols = [("SKU", 0), ("Blok", 160), ("Adet", 220), ("Gift box", 280), ("Şekil", 350), ("", 410)]
     c.setFont(bold, 10)
     for title, dx in cols:
         c.drawString(40 + dx, y, _t(title))
@@ -508,7 +677,7 @@ def _summary_pages(blocks: list[Block], run_id: str, warn_counts: dict[str, int]
             c.showPage()
             y = H - 50
         c.setFont(reg, 10)
-        for val, (_, dx) in zip([r["sku"], r["blok"], r["adet"], r["gift_box"], "DİĞER" if r["diğer"] else ""], cols):
+        for val, (_, dx) in zip([r["sku"], r["blok"], r["adet"], r["gift_box"], r["şekil"], "DİĞER" if r["diğer"] else ""], cols):
             c.drawString(40 + dx, y, _t(str(val)))
         y -= 14
     c.save()
@@ -532,7 +701,7 @@ def _divider_page(run_id: str, count: int) -> bytes:
 
 def build_pdfs(blocks: list[Block], slips_by_package: dict[str, bytes], run_id: str,
                warn_counts: dict[str, int] | None = None,
-               per_file: int = BLOCKS_PER_FILE) -> list[tuple[str, bytes]]:
+               per_file: int = BLOCKS_PER_FILE, scope_label: str = "") -> list[tuple[str, bytes]]:
     """
     Sıralı bloklardan damgalı PDF'ler üretir (bellekte). İlk dosyanın başında özet sayfası,
     'diğer' bölümünün önünde ayraç sayfası. Dönüş: [(dosya_adı, bytes), ...]
@@ -550,7 +719,7 @@ def build_pdfs(blocks: list[Block], slips_by_package: dict[str, bytes], run_id: 
     for ci, chunk in enumerate(chunks, 1):
         w = PdfWriter()
         if ci == 1:
-            for pg in PdfReader(io.BytesIO(_summary_pages(blocks, run_id, warn_counts or {}, len(chunks)))).pages:
+            for pg in PdfReader(io.BytesIO(_summary_pages(blocks, run_id, warn_counts or {}, len(chunks), scope_label))).pages:
                 w.add_page(pg)
         for b in chunk:
             num += 1
@@ -563,7 +732,7 @@ def build_pdfs(blocks: list[Block], slips_by_package: dict[str, bytes], run_id: 
                 if page.get("/Rotate"):
                     page.transfer_rotation_to_content()
                 box = page.mediabox
-                text = f"{run_id} · #{num:03d} · {j}/{b.page_count}" + (" · DİĞER" if b.is_other else "")
+                text = stamp_text(run_id, num, j, b)
                 page.merge_page(_stamp_overlay(text, float(box.left), float(box.bottom),
                                                float(box.right), float(box.top)))
         buf = io.BytesIO()
